@@ -130,11 +130,11 @@ export default function MultiViewer() {
         </Button>
       </div>
 
-      <div ref={multiviewerRef} className="grid grid-cols-5 gap-4">
+      <div ref={multiviewerRef} className="grid grid-cols-5 gap-4 overflow-hidden">
         {Array.from({ length: 25 }).map((_, index) => {
           const stream = streams[index]
           return (
-            <div key={index} className="aspect-video">
+            <div key={index} className="aspect-video rounded-lg overflow-hidden">
               {stream ? (
                 <VideoPlayer
                   title={stream.title}
