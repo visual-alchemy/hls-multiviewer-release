@@ -43,7 +43,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted }: VideoPlay
   }, [isMuted])
 
   return (
-    <div className="relative rounded-lg overflow-hidden bg-black flex">
+    <div className="relative rounded-lg overflow-hidden bg-black flex aspect-video">
       <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
 
       {/* Title in top-left */}
