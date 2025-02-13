@@ -82,5 +82,5 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
+This project is licensed under the [Apache 2.0 License](https://github.com/visual-alchemy/hls-multiviewer-v13/blob/main/LICENSE.txt).
 ```
