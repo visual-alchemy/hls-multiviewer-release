@@ -4,17 +4,14 @@ import "./globals.css"
 import type React from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 
-// Initialize the Inter font
 const inter = Inter({ subsets: ["latin"] })
 
-// Metadata for the application
 export const metadata: Metadata = {
   title: "Multiviewer",
   description: "A multiviewer application for streaming media",
-    generator: 'v0.dev'
+  generator: "v0.dev",
 }
 
-// Root layout component
 export default function RootLayout({
   children,
 }: {

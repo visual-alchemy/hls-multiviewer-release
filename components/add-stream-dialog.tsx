@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-// Props interface for the AddStreamDialog component
 interface AddStreamDialogProps {
   onAdd: (title: string, url: string) => void
   onClose?: () => void
@@ -23,7 +22,6 @@ interface AddStreamDialogProps {
   trigger?: React.ReactNode
 }
 
-// AddStreamDialog component for adding or editing stream details
 export function AddStreamDialog({
   onAdd,
   onClose,
@@ -32,26 +30,22 @@ export function AddStreamDialog({
   initialUrl = "",
   trigger,
 }: AddStreamDialogProps) {
-  // State for managing form inputs
   const [title, setTitle] = useState(initialTitle)
   const [url, setUrl] = useState(initialUrl)
   const [open, setOpen] = useState(false)
   const dialogDescriptionId = React.useId()
 
-  // Effect to control dialog open state
   useEffect(() => {
     if (isOpen !== undefined) {
       setOpen(isOpen)
     }
   }, [isOpen])
 
-  // Effect to update form inputs when editing an existing stream
   useEffect(() => {
     setTitle(initialTitle)
     setUrl(initialUrl)
   }, [initialTitle, initialUrl])
 
-  // Function to handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onAdd(title, url)

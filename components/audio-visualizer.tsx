@@ -3,23 +3,26 @@
 import { useEffect, useRef, useState } from "react"
 import type React from "react"
 
-// Props interface for the AudioVisualizer component
+// Define the props for the AudioVisualizer component
 interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
-// AudioVisualizer component for displaying audio levels
 export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
-  // Refs for canvas, animation frame, and audio context
+  // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Reference to the animation frame
   const animationRef = useRef<number>()
+  // Reference to the audio analyser
   const analyserRef = useRef<AnalyserNode>()
+  // Reference to the audio context
   const audioContextRef = useRef<AudioContext>()
+  // Reference to the audio source
   const sourceRef = useRef<MediaElementAudioSourceNode>()
-  // State to track if audio context is active
+  // State to track if the audio context is active
   const [isContextActive, setIsContextActive] = useState(false)
 
-  // Effect to initialize AudioContext on user interaction
+  // Effect to initialize the AudioContext on user interaction
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -56,6 +59,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
     const video = videoRef.current
     if (!video || !canvasRef.current || !isContextActive || !audioContextRef.current) return
 
+    // Set up audio nodes
     const setupAudioNodes = () => {
       if (!audioContextRef.current || !video) return
 
@@ -89,6 +93,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
     const bufferLength = analyser.frequencyBinCount
     const dataArray = new Uint8Array(bufferLength)
 
+    // Draw function for the audio visualizer
     const draw = () => {
       if (audioContextRef.current?.state === "closed") return
 
@@ -100,7 +105,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
 
       // Draw left channel (first bar)
-      const barWidth = 4
+      const barWidth = 6
       const gap = 2
       const leftValue = dataArray[0]
       const leftHeight = (leftValue / 255) * (HEIGHT - 12) // Adjusted for label space
@@ -134,7 +139,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
     }
   }, [videoRef, isContextActive])
 
-  // Final cleanup
+  // Effect for final cleanup
   useEffect(() => {
     return () => {
       if (animationRef.current) {
@@ -153,8 +158,8 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
   }, [])
 
   return (
-    <div className="h-full w-[10px]">
-      <canvas ref={canvasRef} width={10} height={100} className="h-full w-full opacity-80" />
+    <div className="h-full w-[20px]">
+      <canvas ref={canvasRef} width={20} height={100} className="h-full w-full opacity-80" />
     </div>
   )
 }

@@ -13,7 +13,6 @@ interface Stream {
   url: string
 }
 
-// Main component for the multiviewer application
 export default function MultiViewer() {
   // State to store the list of streams
   const [streams, setStreams] = useState<Stream[]>([])
@@ -21,10 +20,10 @@ export default function MultiViewer() {
   const [editingStream, setEditingStream] = useState<Stream | null>(null)
   // State to control global mute for all streams
   const [globalMute, setGlobalMute] = useState(true)
-  // Ref for the multiviewer container (used for fullscreen)
+  // Reference to the multiviewer container for fullscreen functionality
   const multiviewerRef = useRef<HTMLDivElement>(null)
 
-  // Fetch streams from the API when the component mounts
+  // Load streams from the API when component mounts
   useEffect(() => {
     fetchStreams()
   }, [])
@@ -42,7 +41,7 @@ export default function MultiViewer() {
     }
   }
 
-  // Function to add a new stream
+  // Function to handle adding a new stream
   const handleAddStream = async (title: string, url: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -61,7 +60,7 @@ export default function MultiViewer() {
     }
   }
 
-  // Function to set up editing for a stream
+  // Function to set up stream editing
   const handleEditStream = (id: string) => {
     const streamToEdit = streams.find((stream) => stream.id === id)
     if (streamToEdit) {
@@ -69,7 +68,7 @@ export default function MultiViewer() {
     }
   }
 
-  // Function to update an existing stream
+  // Function to handle updating an existing stream
   const handleUpdateStream = async (id: string, title: string, url: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -89,7 +88,7 @@ export default function MultiViewer() {
     setEditingStream(null)
   }
 
-  // Function to delete a stream
+  // Function to handle deleting a stream
   const handleDeleteStream = async (id: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -145,8 +144,8 @@ export default function MultiViewer() {
       </div>
 
       {/* Grid of video players */}
-      <div ref={multiviewerRef} className="grid grid-cols-5 gap-4">
-        {Array.from({ length: 25 }).map((_, index) => {
+      <div ref={multiviewerRef} className="grid grid-cols-6 gap-4">
+        {Array.from({ length: 42 }).map((_, index) => {
           const stream = streams[index]
           return (
             <div key={index} className="aspect-video">
