@@ -42,6 +42,12 @@ cd hls-multiviewer
 npm install
 ```
 
+if you found issue for instaling dependency’s use these instead
+
+```
+npm install --legacy-peer-deps
+```
+
 ## Usage
 
 1. Start the development server:
