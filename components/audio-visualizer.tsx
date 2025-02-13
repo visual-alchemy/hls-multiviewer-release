@@ -3,19 +3,23 @@
 import { useEffect, useRef, useState } from "react"
 import type React from "react"
 
+// Props interface for the AudioVisualizer component
 interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
+// AudioVisualizer component for displaying audio levels
 export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
+  // Refs for canvas, animation frame, and audio context
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number>()
   const analyserRef = useRef<AnalyserNode>()
   const audioContextRef = useRef<AudioContext>()
   const sourceRef = useRef<MediaElementAudioSourceNode>()
+  // State to track if audio context is active
   const [isContextActive, setIsContextActive] = useState(false)
 
-  // Initialize AudioContext on user interaction
+  // Effect to initialize AudioContext on user interaction
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -47,7 +51,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
     }
   }, [videoRef])
 
-  // Handle audio visualization
+  // Effect to handle audio visualization
   useEffect(() => {
     const video = videoRef.current
     if (!video || !canvasRef.current || !isContextActive || !audioContextRef.current) return

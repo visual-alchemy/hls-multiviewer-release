@@ -1,27 +1,14 @@
-import fs from "fs"
-import path from "path"
+import type { Stream } from "./types"
 
-export interface Stream {
-  id: string
-  title: string
-  url: string
-}
-
-const STREAMS_FILE = path.join(process.cwd(), "data", "streams.json")
+let streams: Stream[] = []
 
 export function getStreams(): Stream[] {
-  if (!fs.existsSync(STREAMS_FILE)) {
-    return []
-  }
-  const data = fs.readFileSync(STREAMS_FILE, "utf-8")
-  return JSON.parse(data)
+  return streams
 }
 
-export function saveStreams(streams: Stream[]): void {
-  const dir = path.dirname(STREAMS_FILE)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  fs.writeFileSync(STREAMS_FILE, JSON.stringify(streams, null, 2))
+export function saveStreams(newStreams: Stream[]): void {
+  streams = newStreams
 }
+
+export type { Stream }
 

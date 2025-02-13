@@ -6,23 +6,30 @@ import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { Button } from "@/components/ui/button"
 import { Maximize, Plus, Volume2, VolumeX } from "lucide-react"
 
+// Define the structure of a stream object
 interface Stream {
   id: string
   title: string
   url: string
 }
 
+// Main component for the multiviewer application
 export default function MultiViewer() {
+  // State to store the list of streams
   const [streams, setStreams] = useState<Stream[]>([])
+  // State to keep track of the stream being edited
   const [editingStream, setEditingStream] = useState<Stream | null>(null)
+  // State to control global mute for all streams
   const [globalMute, setGlobalMute] = useState(true)
+  // Ref for the multiviewer container (used for fullscreen)
   const multiviewerRef = useRef<HTMLDivElement>(null)
 
-  // Load streams from the API when component mounts
+  // Fetch streams from the API when the component mounts
   useEffect(() => {
     fetchStreams()
   }, [])
 
+  // Function to fetch streams from the API
   const fetchStreams = async () => {
     try {
       const response = await fetch("/api/streams")
@@ -35,6 +42,7 @@ export default function MultiViewer() {
     }
   }
 
+  // Function to add a new stream
   const handleAddStream = async (title: string, url: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -53,6 +61,7 @@ export default function MultiViewer() {
     }
   }
 
+  // Function to set up editing for a stream
   const handleEditStream = (id: string) => {
     const streamToEdit = streams.find((stream) => stream.id === id)
     if (streamToEdit) {
@@ -60,6 +69,7 @@ export default function MultiViewer() {
     }
   }
 
+  // Function to update an existing stream
   const handleUpdateStream = async (id: string, title: string, url: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -79,6 +89,7 @@ export default function MultiViewer() {
     setEditingStream(null)
   }
 
+  // Function to delete a stream
   const handleDeleteStream = async (id: string) => {
     try {
       const response = await fetch("/api/streams", {
@@ -97,6 +108,7 @@ export default function MultiViewer() {
     }
   }
 
+  // Function to toggle fullscreen mode
   const handleFullscreen = () => {
     if (multiviewerRef.current) {
       if (!document.fullscreenElement) {
@@ -107,12 +119,14 @@ export default function MultiViewer() {
     }
   }
 
+  // Function to toggle global mute
   const toggleGlobalMute = () => {
     setGlobalMute((prev) => !prev)
   }
 
   return (
     <div className="min-h-screen bg-[#1a1b26] p-4">
+      {/* Control buttons */}
       <div className="flex justify-end gap-2 mb-6">
         <AddStreamDialog
           onAdd={handleAddStream}
@@ -130,11 +144,12 @@ export default function MultiViewer() {
         </Button>
       </div>
 
-      <div ref={multiviewerRef} className="grid grid-cols-5 gap-4 overflow-hidden">
+      {/* Grid of video players */}
+      <div ref={multiviewerRef} className="grid grid-cols-5 gap-4">
         {Array.from({ length: 25 }).map((_, index) => {
           const stream = streams[index]
           return (
-            <div key={index} className="aspect-video rounded-lg overflow-hidden">
+            <div key={index} className="aspect-video">
               {stream ? (
                 <VideoPlayer
                   title={stream.title}
@@ -153,6 +168,7 @@ export default function MultiViewer() {
         })}
       </div>
 
+      {/* Edit stream dialog */}
       {editingStream && (
         <AddStreamDialog
           isOpen={true}
