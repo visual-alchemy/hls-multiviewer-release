@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { Button } from "@/components/ui/button"
-import { Maximize, Plus, Volume2, VolumeX } from "lucide-react"
+import { Maximize, Plus, Volume2, VolumeX, Download, Upload } from "lucide-react"
 
 // Define the structure of a stream object
 interface Stream {
@@ -22,6 +22,8 @@ export default function MultiViewer() {
   const [globalMute, setGlobalMute] = useState(true)
   // Reference to the multiviewer container for fullscreen functionality
   const multiviewerRef = useRef<HTMLDivElement>(null)
+  // Reference to the file input for importing streams
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Load streams from the API when component mounts
   useEffect(() => {
@@ -123,10 +125,64 @@ export default function MultiViewer() {
     setGlobalMute((prev) => !prev)
   }
 
+  // Function to export streams
+  const handleExport = () => {
+    const dataStr = JSON.stringify(streams)
+    const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr)
+    const exportFileDefaultName = "streams.json"
+
+    const linkElement = document.createElement("a")
+    linkElement.setAttribute("href", dataUri)
+    linkElement.setAttribute("download", exportFileDefaultName)
+    linkElement.click()
+  }
+
+  // Function to import streams
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result
+          if (typeof content === "string") {
+            const importedStreams = JSON.parse(content) as Stream[]
+            const response = await fetch("/api/streams/import", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(importedStreams),
+            })
+            if (response.ok) {
+              const updatedStreams = await response.json()
+              setStreams(updatedStreams)
+            }
+          }
+        } catch (error) {
+          console.error("Error importing streams:", error)
+        }
+      }
+      reader.readAsText(file)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#1a1b26] p-4">
       {/* Control buttons */}
       <div className="flex justify-end gap-2 mb-6">
+        <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" style={{ display: "none" }} />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => fileInputRef.current?.click()}
+          className="bg-gray-800 hover:bg-gray-700"
+        >
+          <Upload className="h-5 w-5" />
+        </Button>
+        <Button variant="ghost" size="icon" onClick={handleExport} className="bg-gray-800 hover:bg-gray-700">
+          <Download className="h-5 w-5" />
+        </Button>
         <AddStreamDialog
           onAdd={handleAddStream}
           trigger={

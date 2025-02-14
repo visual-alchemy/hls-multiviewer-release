@@ -1,15 +1,15 @@
+// lib/streams.ts
 import type { Stream } from "./types"
 
 let streams: Stream[] = []
 
-export const getStreams = (): Stream[] => {
+export function getStreams(): Stream[] {
   return streams
 }
 
-export const saveStreams = (newStreams: Stream[]): void => {
+export function saveStreams(newStreams: Stream[]): void {
   streams = newStreams
-  // Persist streams (e.g., using localStorage, a database, or a file system)
-  // ... persistence logic here ...
+  // In a real application, you would likely persist streams to a database or local storage here.
 }
 
 export type { Stream }
