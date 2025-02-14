@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import Image from "next/image"
 import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { Button } from "@/components/ui/button"
@@ -169,34 +170,47 @@ export default function MultiViewer() {
 
   return (
     <div className="min-h-screen bg-[#1a1b26] p-4">
-      {/* Control buttons */}
-      <div className="flex justify-end gap-2 mb-6">
-        <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" style={{ display: "none" }} />
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => fileInputRef.current?.click()}
-          className="bg-gray-800 hover:bg-gray-700"
-        >
-          <Upload className="h-5 w-5" />
-        </Button>
-        <Button variant="ghost" size="icon" onClick={handleExport} className="bg-gray-800 hover:bg-gray-700">
-          <Download className="h-5 w-5" />
-        </Button>
-        <AddStreamDialog
-          onAdd={handleAddStream}
-          trigger={
-            <Button variant="ghost" size="icon" className="bg-gray-800 hover:bg-gray-700">
-              <Plus className="h-5 w-5" />
-            </Button>
-          }
-        />
-        <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
-          {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-        </Button>
-        <Button variant="ghost" size="icon" onClick={handleFullscreen} className="bg-gray-800 hover:bg-gray-700">
-          <Maximize className="h-5 w-5" />
-        </Button>
+      {/* Header with logo and title */}
+      <div className="flex items-center mb-6">
+        <div className="flex items-center">
+          <Image
+            src="https://i.ibb.co.com/tT7cmrcv/Logo-Vidio-Apps.png"
+            alt="Vidio Logo"
+            width={32}
+            height={32}
+            className="mr-2"
+          />
+          <h1 className="text-white text-xl font-semibold">Vidio HLS Multiviewer</h1>
+        </div>
+        {/* Control buttons */}
+        <div className="flex ml-auto gap-2">
+          <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" style={{ display: "none" }} />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-gray-800 hover:bg-gray-700"
+          >
+            <Upload className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleExport} className="bg-gray-800 hover:bg-gray-700">
+            <Download className="h-5 w-5" />
+          </Button>
+          <AddStreamDialog
+            onAdd={handleAddStream}
+            trigger={
+              <Button variant="ghost" size="icon" className="bg-gray-800 hover:bg-gray-700">
+                <Plus className="h-5 w-5" />
+              </Button>
+            }
+          />
+          <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
+            {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleFullscreen} className="bg-gray-800 hover:bg-gray-700">
+            <Maximize className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
 
       {/* Grid of video players */}
