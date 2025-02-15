@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import { VideoPlayer } from "@/components/video-player"
@@ -25,10 +27,25 @@ export default function MultiViewer() {
   const multiviewerRef = useRef<HTMLDivElement>(null)
   // Reference to the file input for importing streams
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // State to track fullscreen status
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Load streams from the API when component mounts
   useEffect(() => {
     fetchStreams()
+  }, [])
+
+  // Effect to handle fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+    }
   }, [])
 
   // Function to fetch streams from the API
@@ -112,12 +129,10 @@ export default function MultiViewer() {
 
   // Function to toggle fullscreen mode
   const handleFullscreen = () => {
-    if (multiviewerRef.current) {
-      if (!document.fullscreenElement) {
-        multiviewerRef.current.requestFullscreen()
-      } else {
-        document.exitFullscreen()
-      }
+    if (!isFullscreen) {
+      multiviewerRef.current?.requestFullscreen()
+    } else {
+      document.exitFullscreen()
     }
   }
 
@@ -169,9 +184,9 @@ export default function MultiViewer() {
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1b26] p-4">
+    <div className={`min-h-screen bg-[#1a1b26] ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
-      <div className="flex items-center mb-6">
+      <div className={`flex items-center mb-6 ${isFullscreen ? "hidden" : ""}`}>
         <div className="flex items-center">
           <Image
             src="https://i.ibb.co.com/tT7cmrcv/Logo-Vidio-Apps.png"
@@ -214,11 +229,13 @@ export default function MultiViewer() {
       </div>
 
       {/* Grid of video players */}
-      <div ref={multiviewerRef} className="grid grid-cols-6 gap-4">
+      <div
+        className={`grid gap-2 w-full ${isFullscreen ? "h-screen grid-cols-6 auto-rows-fr overflow-auto p-2" : "grid-cols-6 gap-4"}`}
+      >
         {Array.from({ length: 42 }).map((_, index) => {
           const stream = streams[index]
           return (
-            <div key={index} className="aspect-video">
+            <div key={index} className={`${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`}>
               {stream ? (
                 <VideoPlayer
                   title={stream.title}
@@ -226,6 +243,7 @@ export default function MultiViewer() {
                   onEdit={() => handleEditStream(stream.id)}
                   onDelete={() => handleDeleteStream(stream.id)}
                   isMuted={globalMute}
+                  isFullscreen={isFullscreen}
                 />
               ) : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
@@ -236,6 +254,28 @@ export default function MultiViewer() {
           )
         })}
       </div>
+
+      {/* Fullscreen controls */}
+      {isFullscreen && (
+        <div className="fixed bottom-4 right-4 z-50 flex gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleGlobalMute}
+            className="bg-gray-800/50 hover:bg-gray-700/50"
+          >
+            {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleFullscreen}
+            className="bg-gray-800/50 hover:bg-gray-700/50"
+          >
+            <Maximize className="h-5 w-5" />
+          </Button>
+        </div>
+      )}
 
       {/* Edit stream dialog */}
       {editingStream && (
