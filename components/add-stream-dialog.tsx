@@ -1,14 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogDescription,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -16,30 +9,15 @@ import { Label } from "@/components/ui/label"
 interface AddStreamDialogProps {
   onAdd: (title: string, url: string) => void
   onClose?: () => void
-  isOpen?: boolean
+  isOpen: boolean
   initialTitle?: string
   initialUrl?: string
-  trigger?: React.ReactNode
 }
 
-export function AddStreamDialog({
-  onAdd,
-  onClose,
-  isOpen,
-  initialTitle = "",
-  initialUrl = "",
-  trigger,
-}: AddStreamDialogProps) {
+export function AddStreamDialog({ onAdd, onClose, isOpen, initialTitle = "", initialUrl = "" }: AddStreamDialogProps) {
   const [title, setTitle] = useState(initialTitle)
   const [url, setUrl] = useState(initialUrl)
-  const [open, setOpen] = useState(false)
   const dialogDescriptionId = React.useId()
-
-  useEffect(() => {
-    if (isOpen !== undefined) {
-      setOpen(isOpen)
-    }
-  }, [isOpen])
 
   useEffect(() => {
     setTitle(initialTitle)
@@ -51,50 +29,39 @@ export function AddStreamDialog({
     onAdd(title, url)
     setTitle("")
     setUrl("")
-    setOpen(false)
     onClose?.()
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="bg-[#1f2937] border-gray-700" aria-describedby={dialogDescriptionId}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent aria-describedby={dialogDescriptionId}>
         <DialogHeader>
-          <DialogTitle className="text-white">{initialTitle ? "Edit Stream" : "Add New Stream"}</DialogTitle>
-          <DialogDescription id={dialogDescriptionId} className="text-gray-400">
-            {initialTitle
-              ? "Update the details of the existing stream."
-              : "Enter the details to add a new video stream to the multiviewer."}
-          </DialogDescription>
+          <DialogTitle>{initialTitle ? "Edit Stream" : "Add New Stream"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="title" className="text-gray-200">
-              Title
-            </Label>
+            <Label htmlFor="title">Title</Label>
             <Input
               id="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Enter stream title"
               required
-              className="bg-gray-800 border-gray-700 text-white"
+              className="bg-gray-800 border-gray-600"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="url" className="text-gray-200">
-              Stream URL
-            </Label>
+            <Label htmlFor="url">Stream URL</Label>
             <Input
               id="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="Enter stream URL (HLS, FLV, etc.)"
               required
-              className="bg-gray-800 border-gray-700 text-white"
+              className="bg-gray-800 border-gray-600"
             />
           </div>
-          <Button type="submit" className="w-full">
+          <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
             {initialTitle ? "Update" : "Add"} Stream
           </Button>
         </form>

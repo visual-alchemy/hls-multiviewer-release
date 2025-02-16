@@ -6,8 +6,9 @@ import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
+import { GridConfigDialog } from "@/components/grid-config-dialog"
 import { Button } from "@/components/ui/button"
-import { Maximize, Plus, Volume2, VolumeX, Download, Upload } from "lucide-react"
+import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid } from "lucide-react"
 
 // Define the structure of a stream object
 interface Stream {
@@ -29,6 +30,12 @@ export default function MultiViewer() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // State to track fullscreen status
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // State for grid configuration
+  const [gridRows, setGridRows] = useState(6)
+  const [gridColumns, setGridColumns] = useState(7)
+  const [isGridConfigOpen, setIsGridConfigOpen] = useState(false)
+  // State for add stream dialog
+  const [isAddStreamOpen, setIsAddStreamOpen] = useState(false)
 
   // Load streams from the API when component mounts
   useEffect(() => {
@@ -45,6 +52,16 @@ export default function MultiViewer() {
 
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
+    }
+  }, [])
+
+  // Load grid configuration from localStorage
+  useEffect(() => {
+    const savedConfig = localStorage.getItem("gridConfig")
+    if (savedConfig) {
+      const { rows, columns } = JSON.parse(savedConfig)
+      setGridRows(rows)
+      setGridColumns(columns)
     }
   }, [])
 
@@ -78,6 +95,7 @@ export default function MultiViewer() {
     } catch (error) {
       console.error("Error adding stream:", error)
     }
+    setIsAddStreamOpen(false)
   }
 
   // Function to set up stream editing
@@ -163,6 +181,9 @@ export default function MultiViewer() {
           const content = e.target?.result
           if (typeof content === "string") {
             const importedStreams = JSON.parse(content) as Stream[]
+            if (!Array.isArray(importedStreams)) {
+              throw new Error("Imported data is not an array")
+            }
             const response = await fetch("/api/streams/import", {
               method: "POST",
               headers: {
@@ -170,17 +191,31 @@ export default function MultiViewer() {
               },
               body: JSON.stringify(importedStreams),
             })
-            if (response.ok) {
-              const updatedStreams = await response.json()
-              setStreams(updatedStreams)
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`)
             }
+            const updatedStreams = await response.json()
+            setStreams(updatedStreams)
           }
         } catch (error) {
           console.error("Error importing streams:", error)
+          // You might want to show this error to the user in the UI
+          alert(`Error importing streams: ${error instanceof Error ? error.message : String(error)}`)
         }
+      }
+      reader.onerror = (error) => {
+        console.error("FileReader error:", error)
+        alert("Error reading file. Please try again.")
       }
       reader.readAsText(file)
     }
+  }
+
+  // Function to handle grid configuration changes
+  const handleGridConfigChange = (rows: number, columns: number) => {
+    setGridRows(rows)
+    setGridColumns(columns)
+    localStorage.setItem("gridConfig", JSON.stringify({ rows, columns }))
   }
 
   return (
@@ -211,14 +246,22 @@ export default function MultiViewer() {
           <Button variant="ghost" size="icon" onClick={handleExport} className="bg-gray-800 hover:bg-gray-700">
             <Download className="h-5 w-5" />
           </Button>
-          <AddStreamDialog
-            onAdd={handleAddStream}
-            trigger={
-              <Button variant="ghost" size="icon" className="bg-gray-800 hover:bg-gray-700">
-                <Plus className="h-5 w-5" />
-              </Button>
-            }
-          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsAddStreamOpen(true)}
+            className="bg-gray-800 hover:bg-gray-700"
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsGridConfigOpen(true)}
+            className="bg-gray-800 hover:bg-gray-700"
+          >
+            <Grid className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
             {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
           </Button>
@@ -230,9 +273,13 @@ export default function MultiViewer() {
 
       {/* Grid of video players */}
       <div
-        className={`grid gap-2 w-full ${isFullscreen ? "h-screen grid-cols-6 auto-rows-fr overflow-auto p-2" : "grid-cols-6 gap-4"}`}
+        className={`grid gap-2 w-full ${isFullscreen ? "h-screen auto-rows-fr overflow-auto p-2" : "gap-4"}`}
+        style={{
+          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
+        }}
       >
-        {Array.from({ length: 42 }).map((_, index) => {
+        {Array.from({ length: gridRows * gridColumns }).map((_, index) => {
           const stream = streams[index]
           return (
             <div key={index} className={`${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`}>
@@ -277,6 +324,9 @@ export default function MultiViewer() {
         </div>
       )}
 
+      {/* Add stream dialog */}
+      <AddStreamDialog isOpen={isAddStreamOpen} onAdd={handleAddStream} onClose={() => setIsAddStreamOpen(false)} />
+
       {/* Edit stream dialog */}
       {editingStream && (
         <AddStreamDialog
@@ -287,6 +337,15 @@ export default function MultiViewer() {
           initialUrl={editingStream.url}
         />
       )}
+
+      {/* Grid configuration dialog */}
+      <GridConfigDialog
+        isOpen={isGridConfigOpen}
+        onClose={() => setIsGridConfigOpen(false)}
+        onConfigChange={handleGridConfigChange}
+        initialRows={gridRows}
+        initialColumns={gridColumns}
+      />
     </div>
   )
 }
