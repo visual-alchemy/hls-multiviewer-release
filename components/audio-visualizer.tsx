@@ -104,12 +104,18 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
 
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
 
+      // Create gradient
+      const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT - 12)
+      gradient.addColorStop(0, "red")
+      gradient.addColorStop(0.5, "yellow")
+      gradient.addColorStop(1, "green")
+
       // Draw left channel (first bar)
       const barWidth = 6
       const gap = 2
       const leftValue = dataArray[0]
       const leftHeight = (leftValue / 255) * (HEIGHT - 12) // Adjusted for label space
-      ctx.fillStyle = `rgb(0, 255, 0)`
+      ctx.fillStyle = gradient
       ctx.fillRect(0, HEIGHT - 12 - leftHeight, barWidth, leftHeight)
 
       // Draw right channel (second bar)
