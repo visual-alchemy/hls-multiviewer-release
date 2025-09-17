@@ -76,6 +76,20 @@ npm run build
 npm start
 ```
 
+## Running with Docker
+
+1. Build the Docker image:
+```
+docker build -t hls-multiviewer .
+```
+
+2. Run the Docker container:
+```
+docker run -d -p 3111:3111 hls-multiviewer
+```
+
+3. Open your browser and visit `http://localhost:3111`
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
