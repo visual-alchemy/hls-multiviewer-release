@@ -93,3 +93,13 @@ body {
   }
 }
 
+@keyframes blink {
+  50% {
+    box-shadow: 0 0 0 3px red;
+  }
+}
+
+.blinking-border {
+  animation: blink 1s infinite;
+  box-shadow: 0 0 0 3px transparent;
+}

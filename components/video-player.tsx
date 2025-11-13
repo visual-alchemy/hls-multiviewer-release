@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import Hls from "hls.js"
 import { Edit2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,8 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscreen }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const hlsRef = useRef<Hls | null>(null)
+  const [hasError, setHasError] = useState(false)
 
   useEffect(() => {
     const video = videoRef.current
@@ -24,11 +26,35 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
 
     if (url.includes(".m3u8")) {
       if (Hls.isSupported()) {
-        const hls = new Hls()
+        const hls = new Hls({
+          maxMaxBufferLength: 30,
+          maxBufferSize: 60 * 1024 * 1024,
+          backBufferLength: 10,
+          xhrSetup: function (xhr, url) {
+            xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
+          },
+        })
+        hlsRef.current = hls
         hls.loadSource(url)
         hls.attachMedia(video)
+
+        const handlePlaying = () => {
+          setHasError(false)
+        }
+
+        video.addEventListener("playing", handlePlaying)
+
+        hls.on(Hls.Events.ERROR, function (event, data) {
+          console.log("HLS Error:", data)
+          if (data.fatal) {
+            setHasError(true)
+          }
+        })
+
         return () => {
+          video.removeEventListener("playing", handlePlaying)
           hls.destroy()
+          hlsRef.current = null
         }
       }
     } else {
@@ -43,8 +69,43 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
     }
   }, [isMuted])
 
+  useEffect(() => {
+    let audio: HTMLAudioElement | null = null
+    if (hasError) {
+      audio = new Audio("/alert.mp3")
+      audio.loop = true
+      audio.play().catch(e => console.error("Error playing audio:", e))
+    }
+    return () => {
+      if (audio) {
+        audio.pause()
+        audio.currentTime = 0
+      }
+    }
+  }, [hasError])
+
+  useEffect(() => {
+    if (!hasError) {
+      return
+    }
+
+    const hls = hlsRef.current
+    if (!hls) {
+      return
+    }
+
+    const retryInterval = setInterval(() => {
+      console.log("Attempting to recover stream...")
+      hls.recoverMediaError()
+    }, 5000)
+
+    return () => {
+      clearInterval(retryInterval)
+    }
+  }, [hasError])
+
   return (
-    <div className="relative rounded-lg overflow-hidden bg-black flex h-full w-full">
+    <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${hasError ? "blinking-border" : ""}`}>
       {/* Video element */}
       <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
 
@@ -70,4 +131,3 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
     </div>
   )
 }
-
