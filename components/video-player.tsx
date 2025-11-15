@@ -63,13 +63,6 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
   }, [url])
 
   useEffect(() => {
-    const video = videoRef.current
-    if (video) {
-      video.muted = isMuted
-    }
-  }, [isMuted])
-
-  useEffect(() => {
     let audio: HTMLAudioElement | null = null
     if (hasError) {
       audio = new Audio("/alert.mp3")
@@ -124,9 +117,9 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         </div>
       </div>
 
-      {/* Audio visualizer */}
+      {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
-        <AudioVisualizer videoRef={videoRef} />
+        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} />
       </div>
     </div>
   )

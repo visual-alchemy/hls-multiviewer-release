@@ -1,14 +1,15 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import type React from "react"
 
 // Define the props for the AudioVisualizer component
 interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
+  isMuted: boolean
 }
 
-export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
+export function AudioVisualizer({ videoRef, isMuted }: AudioVisualizerProps) {
   // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Reference to the animation frame
@@ -19,6 +20,8 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
   const audioContextRef = useRef<AudioContext>()
   // Reference to the audio source
   const sourceRef = useRef<MediaElementAudioSourceNode>()
+  // Reference to the gain node controlling audible output
+  const gainNodeRef = useRef<GainNode>()
   // Effect to handle audio visualization
   useEffect(() => {
     const video = videoRef.current
@@ -43,9 +46,12 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
         try {
           sourceRef.current = audioContextRef.current.createMediaElementSource(video)
           analyserRef.current = audioContextRef.current.createAnalyser()
+          gainNodeRef.current = audioContextRef.current.createGain()
           analyserRef.current.fftSize = 32
           sourceRef.current.connect(analyserRef.current)
-          analyserRef.current.connect(audioContextRef.current.destination)
+          analyserRef.current.connect(gainNodeRef.current)
+          gainNodeRef.current.connect(audioContextRef.current.destination)
+          gainNodeRef.current.gain.value = isMuted ? 0 : 1
         } catch (error) {
           console.error("Error setting up audio nodes:", error)
           return
@@ -110,6 +116,10 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
         sourceRef.current.disconnect()
         sourceRef.current = undefined
       }
+      if (gainNodeRef.current) {
+        gainNodeRef.current.disconnect()
+        gainNodeRef.current = undefined
+      }
       if (analyserRef.current) {
         analyserRef.current.disconnect()
         analyserRef.current = undefined
@@ -120,6 +130,14 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
       }
     }
   }, [videoRef])
+
+  useEffect(() => {
+    if (!gainNodeRef.current || !audioContextRef.current) return
+    const gain = gainNodeRef.current
+    const context = audioContextRef.current
+    const value = isMuted ? 0 : 1
+    gain.gain.setTargetAtTime(value, context.currentTime, 0.01)
+  }, [isMuted])
 
   return (
     <div className="h-full w-[20px]">
