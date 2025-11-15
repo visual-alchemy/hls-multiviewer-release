@@ -7,9 +7,13 @@ import type React from "react"
 interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
   isMuted: boolean
+  onSilenceChange?: (isSilent: boolean) => void
 }
 
-export function AudioVisualizer({ videoRef, isMuted }: AudioVisualizerProps) {
+const SILENCE_THRESHOLD = 0.01
+const SILENCE_DURATION_MS = 3000
+
+export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVisualizerProps) {
   // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Reference to the animation frame
@@ -22,6 +26,16 @@ export function AudioVisualizer({ videoRef, isMuted }: AudioVisualizerProps) {
   const sourceRef = useRef<MediaElementAudioSourceNode>()
   // Reference to the gain node controlling audible output
   const gainNodeRef = useRef<GainNode>()
+  // Track silence timing
+  const silenceStartRef = useRef<number | null>(null)
+  const lastSilenceStateRef = useRef(false)
+
+  const reportSilenceChange = (isSilent: boolean) => {
+    if (lastSilenceStateRef.current !== isSilent) {
+      lastSilenceStateRef.current = isSilent
+      onSilenceChange?.(isSilent)
+    }
+  }
   // Effect to handle audio visualization
   useEffect(() => {
     const video = videoRef.current
@@ -96,6 +110,24 @@ export function AudioVisualizer({ videoRef, isMuted }: AudioVisualizerProps) {
         ctx.fillText("L", 0, HEIGHT - 2)
         ctx.fillText("R", barWidth + gap, HEIGHT - 2)
 
+        // Silence detection – average the spectrum and track duration
+        const avg =
+          dataArray.reduce((sum, value) => sum + value, 0) / (bufferLength || 1)
+        const normalized = avg / 255
+        const videoElement = videoRef.current
+        const now = performance.now()
+        const audioActive = videoElement && !videoElement.paused && videoElement.readyState >= 2
+        if (audioActive && normalized < SILENCE_THRESHOLD) {
+          if (silenceStartRef.current === null) {
+            silenceStartRef.current = now
+          } else if (now - silenceStartRef.current >= SILENCE_DURATION_MS) {
+            reportSilenceChange(true)
+          }
+        } else {
+          silenceStartRef.current = null
+          reportSilenceChange(false)
+        }
+
         animationRef.current = requestAnimationFrame(draw)
       }
 
@@ -128,8 +160,10 @@ export function AudioVisualizer({ videoRef, isMuted }: AudioVisualizerProps) {
         audioContextRef.current.close()
         audioContextRef.current = undefined
       }
+      silenceStartRef.current = null
+      reportSilenceChange(false)
     }
-  }, [videoRef])
+  }, [videoRef, onSilenceChange])
 
   useEffect(() => {
     if (!gainNodeRef.current || !audioContextRef.current) return

@@ -8,7 +8,9 @@ A powerful and flexible multiviewer application for monitoring multiple HLS (HTT
 - Support for HLS (HTTP Live Streaming) video format
 - Real-time audio visualization for each stream
 - Add, edit, and delete streams with persistent storage
-- Global mute/unmute functionality
+- Global mute/unmute functionality that keeps visualizers active
+- Stream health alerting with blinking borders and audible alarms for fatal playback errors or prolonged audio silence
+- Automatic retry/recovery for HLS streams after failures
 - Fullscreen mode for immersive viewing
 - Dark theme for better visibility in low-light environments
 - Cross-device synchronization of stream data

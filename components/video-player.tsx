@@ -18,7 +18,9 @@ interface VideoPlayerProps {
 export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscreen }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
-  const [hasError, setHasError] = useState(false)
+  const [hasFatalError, setHasFatalError] = useState(false)
+  const [isSilent, setIsSilent] = useState(false)
+  const showAlert = hasFatalError || isSilent
 
   useEffect(() => {
     const video = videoRef.current
@@ -39,7 +41,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         hls.attachMedia(video)
 
         const handlePlaying = () => {
-          setHasError(false)
+          setHasFatalError(false)
         }
 
         video.addEventListener("playing", handlePlaying)
@@ -47,7 +49,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         hls.on(Hls.Events.ERROR, function (event, data) {
           console.log("HLS Error:", data)
           if (data.fatal) {
-            setHasError(true)
+            setHasFatalError(true)
           }
         })
 
@@ -64,7 +66,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
 
   useEffect(() => {
     let audio: HTMLAudioElement | null = null
-    if (hasError) {
+    if (showAlert) {
       audio = new Audio("/alert.mp3")
       audio.loop = true
       audio.play().catch(e => console.error("Error playing audio:", e))
@@ -75,10 +77,10 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         audio.currentTime = 0
       }
     }
-  }, [hasError])
+  }, [showAlert])
 
   useEffect(() => {
-    if (!hasError) {
+    if (!hasFatalError) {
       return
     }
 
@@ -95,10 +97,10 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
     return () => {
       clearInterval(retryInterval)
     }
-  }, [hasError])
+  }, [hasFatalError])
 
   return (
-    <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${hasError ? "blinking-border" : ""}`}>
+    <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
       {/* Video element */}
       <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
 
@@ -119,7 +121,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
 
       {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
-        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} />
+        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} />
       </div>
     </div>
   )
