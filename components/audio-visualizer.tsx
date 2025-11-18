@@ -8,15 +8,18 @@ interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
-export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
+interface AudioVisualizerProps {
+  videoRef: React.RefObject<HTMLVideoElement>
+  onAudioData: (data: Uint8Array) => void
+}
+
+export function AudioVisualizer({ videoRef, onAudioData }: AudioVisualizerProps) {
   // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Reference to the animation frame
   const animationRef = useRef<number>()
-  // Reference to the audio analyser
-  const analyserRef = useRef<AnalyserNode>()
-  // Reference to the audio context
   const audioContextRef = useRef<AudioContext>()
+  const analyserRef = useRef<AnalyserNode>()
   // Reference to the audio source
   const sourceRef = useRef<MediaElementAudioSourceNode>()
   // Effect to handle audio visualization
@@ -29,27 +32,21 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
       if (!audioContextRef.current) {
         try {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+          const source = audioContextRef.current.createMediaElementSource(video)
+          sourceRef.current = source
+          const analyser = audioContextRef.current.createAnalyser()
+          analyser.smoothingTimeConstant = 0.8 // Keep smoothing for the visualizer
+          analyser.fftSize = 32
+          source.connect(analyser)
+          analyser.connect(audioContextRef.current.destination)
+          analyserRef.current = analyser
         } catch (error) {
-          console.error("Failed to create AudioContext:", error)
-          return
+          console.error("Failed to initialize audio context:", error)
         }
       }
 
-      if (audioContextRef.current.state === "suspended") {
+      if (audioContextRef.current?.state === "suspended") {
         audioContextRef.current.resume()
-      }
-
-      if (!sourceRef.current) {
-        try {
-          sourceRef.current = audioContextRef.current.createMediaElementSource(video)
-          analyserRef.current = audioContextRef.current.createAnalyser()
-          analyserRef.current.fftSize = 32
-          sourceRef.current.connect(analyserRef.current)
-          analyserRef.current.connect(audioContextRef.current.destination)
-        } catch (error) {
-          console.error("Error setting up audio nodes:", error)
-          return
-        }
       }
 
       const analyser = analyserRef.current
@@ -63,6 +60,7 @@ export function AudioVisualizer({ videoRef }: AudioVisualizerProps) {
         if (!analyserRef.current || audioContextRef.current?.state === "closed") return
 
         analyserRef.current.getByteFrequencyData(dataArray)
+        onAudioData(dataArray)
 
         const WIDTH = canvas.width
         const HEIGHT = canvas.height
