@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import type React from "react"
 
 // Define the props for the AudioVisualizer component
 interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
+  isMuted: boolean
+  onSilenceChange?: (isSilent: boolean) => void
 }
 
 interface AudioVisualizerProps {
@@ -22,6 +24,18 @@ export function AudioVisualizer({ videoRef, onAudioData }: AudioVisualizerProps)
   const analyserRef = useRef<AnalyserNode>()
   // Reference to the audio source
   const sourceRef = useRef<MediaElementAudioSourceNode>()
+  // Reference to the gain node controlling audible output
+  const gainNodeRef = useRef<GainNode>()
+  // Track silence timing
+  const silenceStartRef = useRef<number | null>(null)
+  const lastSilenceStateRef = useRef(false)
+
+  const reportSilenceChange = (isSilent: boolean) => {
+    if (lastSilenceStateRef.current !== isSilent) {
+      lastSilenceStateRef.current = isSilent
+      onSilenceChange?.(isSilent)
+    }
+  }
   // Effect to handle audio visualization
   useEffect(() => {
     const video = videoRef.current
@@ -88,6 +102,24 @@ export function AudioVisualizer({ videoRef, onAudioData }: AudioVisualizerProps)
         ctx.fillText("L", 0, HEIGHT - 2)
         ctx.fillText("R", barWidth + gap, HEIGHT - 2)
 
+        // Silence detection – average the spectrum and track duration
+        const avg =
+          dataArray.reduce((sum, value) => sum + value, 0) / (bufferLength || 1)
+        const normalized = avg / 255
+        const videoElement = videoRef.current
+        const now = performance.now()
+        const audioActive = videoElement && !videoElement.paused && videoElement.readyState >= 2
+        if (audioActive && normalized < SILENCE_THRESHOLD) {
+          if (silenceStartRef.current === null) {
+            silenceStartRef.current = now
+          } else if (now - silenceStartRef.current >= SILENCE_DURATION_MS) {
+            reportSilenceChange(true)
+          }
+        } else {
+          silenceStartRef.current = null
+          reportSilenceChange(false)
+        }
+
         animationRef.current = requestAnimationFrame(draw)
       }
 
@@ -108,6 +140,10 @@ export function AudioVisualizer({ videoRef, onAudioData }: AudioVisualizerProps)
         sourceRef.current.disconnect()
         sourceRef.current = undefined
       }
+      if (gainNodeRef.current) {
+        gainNodeRef.current.disconnect()
+        gainNodeRef.current = undefined
+      }
       if (analyserRef.current) {
         analyserRef.current.disconnect()
         analyserRef.current = undefined
@@ -116,8 +152,18 @@ export function AudioVisualizer({ videoRef, onAudioData }: AudioVisualizerProps)
         audioContextRef.current.close()
         audioContextRef.current = undefined
       }
+      silenceStartRef.current = null
+      reportSilenceChange(false)
     }
-  }, [videoRef])
+  }, [videoRef, onSilenceChange])
+
+  useEffect(() => {
+    if (!gainNodeRef.current || !audioContextRef.current) return
+    const gain = gainNodeRef.current
+    const context = audioContextRef.current
+    const value = isMuted ? 0 : 1
+    gain.gain.setTargetAtTime(value, context.currentTime, 0.01)
+  }, [isMuted])
 
   return (
     <div className="h-full w-[20px]">

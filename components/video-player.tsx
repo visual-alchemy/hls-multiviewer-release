@@ -158,7 +158,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
     return () => {
       clearInterval(retryInterval)
     }
-  }, [hasError])
+  }, [hasFatalError])
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${hasError || isStalled || isSilent ? "blinking-border" : ""}`}>
@@ -185,7 +185,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         </div>
       </div>
 
-      {/* Audio visualizer */}
+      {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
         <AudioVisualizer
           videoRef={videoRef}
