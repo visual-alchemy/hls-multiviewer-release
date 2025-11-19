@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Hls from "hls.js"
-import { Edit2, Trash2 } from "lucide-react"
+import { Edit2, Trash2, Pause, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
 
@@ -13,13 +13,18 @@ interface VideoPlayerProps {
   onDelete: () => void
   isMuted: boolean
   isFullscreen: boolean
+  playbackCommand: {
+    action: "play" | "pause"
+    id: number
+  }
 }
 
-export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscreen }: VideoPlayerProps) {
+export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscreen, playbackCommand }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const [hasFatalError, setHasFatalError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
   const showAlert = hasFatalError || isSilent
 
   useEffect(() => {
@@ -42,6 +47,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
 
         const handlePlaying = () => {
           setHasFatalError(false)
+          setIsPaused(false)
         }
 
         video.addEventListener("playing", handlePlaying)
@@ -63,6 +69,30 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
       video.src = url
     }
   }, [url])
+
+  useEffect(() => {
+    if (!playbackCommand) return
+    const video = videoRef.current
+    if (!video) return
+    if (playbackCommand.action === "play") {
+      video.play().catch((err) => console.error("Error resuming video:", err))
+      setIsPaused(false)
+    } else {
+      video.pause()
+      setIsPaused(true)
+    }
+  }, [playbackCommand])
+
+  const handleTogglePlayback = () => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      video.play().then(() => setIsPaused(false)).catch((err) => console.error("Error resuming video:", err))
+    } else {
+      video.pause()
+      setIsPaused(true)
+    }
+  }
 
   useEffect(() => {
     let audio: HTMLAudioElement | null = null
@@ -109,6 +139,9 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         <div className="flex justify-between items-center px-2 py-1 bg-black bg-opacity-50">
           <p className="text-white text-sm font-medium truncate">{title}</p>
           <div className="flex gap-1 shrink-0">
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={handleTogglePlayback}>
+              {isPaused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            </Button>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={onEdit}>
               <Edit2 className="h-3 w-3" />
             </Button>

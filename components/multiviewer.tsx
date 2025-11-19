@@ -8,7 +8,7 @@ import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { GridConfigDialog } from "@/components/grid-config-dialog"
 import { Button } from "@/components/ui/button"
-import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid } from "lucide-react"
+import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play } from "lucide-react"
 
 // Define the structure of a stream object
 interface Stream {
@@ -159,6 +159,13 @@ export default function MultiViewer() {
     setGlobalMute((prev) => !prev)
   }
 
+  // Global playback state
+  const [isGlobalPaused, setIsGlobalPaused] = useState(false)
+  const [playbackCommand, setPlaybackCommand] = useState<{ action: "play" | "pause"; id: number }>({
+    action: "play",
+    id: 0,
+  })
+
   // Function to export streams
   const handleExport = () => {
     const dataStr = JSON.stringify(streams)
@@ -218,6 +225,14 @@ export default function MultiViewer() {
     localStorage.setItem("gridConfig", JSON.stringify({ rows, columns }))
   }
 
+  const toggleGlobalPlayback = () => {
+    setIsGlobalPaused((prev) => {
+      const nextPaused = !prev
+      setPlaybackCommand((cmd) => ({ action: nextPaused ? "pause" : "play", id: cmd.id + 1 }))
+      return nextPaused
+    })
+  }
+
   return (
     <div className={`min-h-screen bg-[#1a1b26] ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
@@ -262,6 +277,9 @@ export default function MultiViewer() {
           >
             <Grid className="h-5 w-5" />
           </Button>
+          <Button variant="ghost" size="icon" onClick={toggleGlobalPlayback} className="bg-gray-800 hover:bg-gray-700">
+            {isGlobalPaused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+          </Button>
           <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
             {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
           </Button>
@@ -291,6 +309,7 @@ export default function MultiViewer() {
                   onDelete={() => handleDeleteStream(stream.id)}
                   isMuted={globalMute}
                   isFullscreen={isFullscreen}
+                  playbackCommand={playbackCommand}
                 />
               ) : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
@@ -349,4 +368,11 @@ export default function MultiViewer() {
     </div>
   )
 }
-
+  // Function to toggle global playback
+  const toggleGlobalPlayback = () => {
+    setIsGlobalPaused((prev) => {
+      const nextPaused = !prev
+      setPlaybackCommand((cmd) => ({ action: nextPaused ? "pause" : "play", id: cmd.id + 1 }))
+      return nextPaused
+    })
+  }
