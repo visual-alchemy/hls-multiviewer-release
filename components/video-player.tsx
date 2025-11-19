@@ -26,6 +26,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const showAlert = hasFatalError || isSilent
+  const alertMessage = hasFatalError ? "Video Stalled" : isSilent ? "No Sound" : null
 
   useEffect(() => {
     const video = videoRef.current
@@ -132,7 +133,16 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
       {/* Video element */}
-      <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
+      <div className="h-full w-full">
+        <div className="relative h-full w-full">
+          <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
+          {alertMessage && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
+              <span className="text-white text-lg font-semibold drop-shadow">{alertMessage}</span>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Title bar with controls */}
       <div className="absolute top-0 left-0 right-0 z-10">
