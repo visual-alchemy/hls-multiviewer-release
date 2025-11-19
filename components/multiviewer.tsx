@@ -368,11 +368,3 @@ export default function MultiViewer() {
     </div>
   )
 }
-  // Function to toggle global playback
-  const toggleGlobalPlayback = () => {
-    setIsGlobalPaused((prev) => {
-      const nextPaused = !prev
-      setPlaybackCommand((cmd) => ({ action: nextPaused ? "pause" : "play", id: cmd.id + 1 }))
-      return nextPaused
-    })
-  }

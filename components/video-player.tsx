@@ -25,6 +25,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
   const [hasFatalError, setHasFatalError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
+  const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const showAlert = hasFatalError || isSilent
   const alertMessage = hasFatalError ? "Video Stalled" : isSilent ? "No Sound" : null
 
@@ -49,6 +50,10 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         const handlePlaying = () => {
           setHasFatalError(false)
           setIsPaused(false)
+          if (fatalTimerRef.current) {
+            clearTimeout(fatalTimerRef.current)
+            fatalTimerRef.current = null
+          }
         }
 
         video.addEventListener("playing", handlePlaying)
@@ -56,7 +61,12 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         hls.on(Hls.Events.ERROR, function (event, data) {
           console.log("HLS Error:", data)
           if (data.fatal) {
-            setHasFatalError(true)
+            if (!fatalTimerRef.current) {
+              fatalTimerRef.current = setTimeout(() => {
+                setHasFatalError(true)
+                fatalTimerRef.current = null
+              }, 10000)
+            }
           }
         })
 
@@ -64,6 +74,10 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
           video.removeEventListener("playing", handlePlaying)
           hls.destroy()
           hlsRef.current = null
+          if (fatalTimerRef.current) {
+            clearTimeout(fatalTimerRef.current)
+            fatalTimerRef.current = null
+          }
         }
       }
     } else {

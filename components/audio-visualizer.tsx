@@ -11,7 +11,7 @@ interface AudioVisualizerProps {
 }
 
 const SILENCE_THRESHOLD = 0.01
-const SILENCE_DURATION_MS = 3000
+const SILENCE_DURATION_MS = 10000
 
 export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVisualizerProps) {
   // Reference to the canvas element
