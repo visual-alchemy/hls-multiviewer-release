@@ -26,6 +26,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const recoverAttemptsRef = useRef(0)
   const showAlert = hasFatalError || isSilent
   const alertMessage = hasFatalError ? "Video Stalled" : isSilent ? "No Sound" : null
 
@@ -50,6 +51,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
         const handlePlaying = () => {
           setHasFatalError(false)
           setIsPaused(false)
+          recoverAttemptsRef.current = 0
           if (fatalTimerRef.current) {
             clearTimeout(fatalTimerRef.current)
             fatalTimerRef.current = null
@@ -74,6 +76,7 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
           video.removeEventListener("playing", handlePlaying)
           hls.destroy()
           hlsRef.current = null
+          recoverAttemptsRef.current = 0
           if (fatalTimerRef.current) {
             clearTimeout(fatalTimerRef.current)
             fatalTimerRef.current = null
@@ -136,7 +139,16 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
 
     const retryInterval = setInterval(() => {
       console.log("Attempting to recover stream...")
+      recoverAttemptsRef.current += 1
       hls.recoverMediaError()
+      if (recoverAttemptsRef.current % 3 === 0) {
+        console.log("Reloading HLS source after repeated failures")
+        hls.stopLoad()
+        hls.detachMedia()
+        hls.attachMedia(videoRef.current!)
+        hls.loadSource(url)
+        hls.startLoad()
+      }
     }, 5000)
 
     return () => {
