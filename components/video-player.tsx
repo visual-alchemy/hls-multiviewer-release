@@ -17,9 +17,19 @@ interface VideoPlayerProps {
     action: "play" | "pause"
     id: number
   }
+  startDelayMs?: number
 }
 
-export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscreen, playbackCommand }: VideoPlayerProps) {
+export function VideoPlayer({
+  url,
+  title,
+  onEdit,
+  onDelete,
+  isMuted,
+  isFullscreen,
+  playbackCommand,
+  startDelayMs = 0,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const [hasFatalError, setHasFatalError] = useState(false)
@@ -34,59 +44,72 @@ export function VideoPlayer({ url, title, onEdit, onDelete, isMuted, isFullscree
     const video = videoRef.current
     if (!video) return
 
-    if (url.includes(".m3u8")) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          maxMaxBufferLength: 30,
-          maxBufferSize: 60 * 1024 * 1024,
-          backBufferLength: 10,
-          xhrSetup: function (xhr, url) {
-            xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
-          },
-        })
-        hlsRef.current = hls
-        hls.loadSource(url)
-        hls.attachMedia(video)
+    const startTimer = setTimeout(() => {
+      if (url.includes(".m3u8")) {
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            lowLatencyMode: false,
+            liveSyncDurationCount: 4,
+            liveMaxLatencyDurationCount: 20,
+            backBufferLength: 120,
+            maxMaxBufferLength: 90,
+            maxBufferSize: 160 * 1024 * 1024,
+            fragLoadingRetryDelay: 1000,
+            fragLoadingMaxRetry: 5,
+            manifestLoadingRetryDelay: 1000,
+            manifestLoadingMaxRetry: 5,
+            xhrSetup: function (xhr, url) {
+              xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
+            },
+          })
+          hlsRef.current = hls
+          hls.loadSource(url)
+          hls.attachMedia(video)
 
-        const handlePlaying = () => {
-          setHasFatalError(false)
-          setIsPaused(false)
-          recoverAttemptsRef.current = 0
-          if (fatalTimerRef.current) {
-            clearTimeout(fatalTimerRef.current)
-            fatalTimerRef.current = null
-          }
-        }
-
-        video.addEventListener("playing", handlePlaying)
-
-        hls.on(Hls.Events.ERROR, function (event, data) {
-          console.log("HLS Error:", data)
-          if (data.fatal) {
-            if (!fatalTimerRef.current) {
-              fatalTimerRef.current = setTimeout(() => {
-                setHasFatalError(true)
-                fatalTimerRef.current = null
-              }, 10000)
+          const handlePlaying = () => {
+            setHasFatalError(false)
+            setIsPaused(false)
+            recoverAttemptsRef.current = 0
+            if (fatalTimerRef.current) {
+              clearTimeout(fatalTimerRef.current)
+              fatalTimerRef.current = null
             }
           }
-        })
 
-        return () => {
-          video.removeEventListener("playing", handlePlaying)
-          hls.destroy()
-          hlsRef.current = null
-          recoverAttemptsRef.current = 0
-          if (fatalTimerRef.current) {
-            clearTimeout(fatalTimerRef.current)
-            fatalTimerRef.current = null
+          video.addEventListener("playing", handlePlaying)
+
+          hls.on(Hls.Events.ERROR, function (event, data) {
+            console.log("HLS Error:", data)
+            if (data.fatal) {
+              if (!fatalTimerRef.current) {
+                fatalTimerRef.current = setTimeout(() => {
+                  setHasFatalError(true)
+                  fatalTimerRef.current = null
+                }, 10000)
+              }
+            }
+          })
+
+          return () => {
+            video.removeEventListener("playing", handlePlaying)
+            hls.destroy()
+            hlsRef.current = null
+            recoverAttemptsRef.current = 0
+            if (fatalTimerRef.current) {
+              clearTimeout(fatalTimerRef.current)
+              fatalTimerRef.current = null
+            }
           }
         }
+      } else {
+        video.src = url
       }
-    } else {
-      video.src = url
+    }, startDelayMs)
+
+    return () => {
+      clearTimeout(startTimer)
     }
-  }, [url])
+  }, [url, startDelayMs])
 
   useEffect(() => {
     if (!playbackCommand) return

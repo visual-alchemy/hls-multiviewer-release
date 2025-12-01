@@ -18,6 +18,8 @@ interface Stream {
 }
 
 export default function MultiViewer() {
+  // Stagger counter to delay playback start across tiles
+  const [staggerSeed] = useState(() => Math.floor(Math.random() * 1000))
   // State to store the list of streams
   const [streams, setStreams] = useState<Stream[]>([])
   // State to keep track of the stream being edited
@@ -310,6 +312,7 @@ export default function MultiViewer() {
                   isMuted={globalMute}
                   isFullscreen={isFullscreen}
                   playbackCommand={playbackCommand}
+                  startDelayMs={staggerSeed + index * 300}
                 />
               ) : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
