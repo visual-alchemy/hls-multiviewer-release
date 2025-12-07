@@ -149,6 +149,14 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         drawChannel(0, leftSegments)
         drawChannel(channelWidth + channelGap, rightSegments)
 
+        const outlineTop = baseY - (availableHeight + totalGap)
+        const outlineHeight = availableHeight + totalGap
+        const outlineWidth = channelWidth
+        ctx.strokeStyle = "#ffffff"
+        ctx.lineWidth = 1
+        ctx.strokeRect(0.5, outlineTop + 0.5, outlineWidth - 1, outlineHeight - 1)
+        ctx.strokeRect(channelWidth + channelGap + 0.5, outlineTop + 0.5, outlineWidth - 1, outlineHeight - 1)
+
         const labelFontSize = Math.max(6, labelHeight - 10)
         ctx.fillStyle = "#ffffff"
         ctx.font = `${labelFontSize}px Arial`
