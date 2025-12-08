@@ -18,6 +18,8 @@ const FRAME_INTERVAL_MS = 33 // ~30 FPS
 export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVisualizerProps) {
   // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Reference to the container element
+  const containerRef = useRef<HTMLDivElement>(null)
   // Reference to the animation frame
   const animationRef = useRef<number>()
   // References to the audio analysers
@@ -35,6 +37,7 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
   const silenceStartRef = useRef<number | null>(null)
   const lastSilenceStateRef = useRef(false)
   const lastFrameTimeRef = useRef(0)
+  const resizeObserverRef = useRef<ResizeObserver>()
 
   const reportSilenceChange = (isSilent: boolean) => {
     if (lastSilenceStateRef.current !== isSilent) {
@@ -46,7 +49,25 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
   useEffect(() => {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas) return
+    const container = containerRef.current
+    if (!video || !canvas || !container) return
+
+    const resizeCanvas = () => {
+      const rect = container.getBoundingClientRect()
+      const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
+      const width = 20
+      const height = Math.max(80, rect.height || 100)
+      canvas.style.width = `${width}px`
+      canvas.style.height = `${height}px`
+      canvas.width = Math.round(width * dpr)
+      canvas.height = Math.round(height * dpr)
+    }
+
+    resizeCanvas()
+    if (!resizeObserverRef.current) {
+      resizeObserverRef.current = new ResizeObserver(resizeCanvas)
+    }
+    resizeObserverRef.current.observe(container)
 
     const initializeAudioContext = () => {
       if (!audioContextRef.current) {
@@ -120,14 +141,29 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         const leftSegments = toSegments(leftAvg)
         const rightSegments = toSegments(rightAvg)
 
-        const segmentGap = 2
-        const labelHeight = 18
+        const segmentGap = Math.max(1, Math.round(HEIGHT * 0.02))
+        const labelHeight = Math.max(10, Math.round(HEIGHT * 0.18))
         const totalGap = segmentGap * (SEGMENT_COUNT - 1)
-        const availableHeight = HEIGHT - totalGap - labelHeight
+        const availableHeight = Math.max(SEGMENT_COUNT, HEIGHT - totalGap - labelHeight)
         const segmentHeight = availableHeight / SEGMENT_COUNT
-        const channelGap = 4
+        const channelGap = Math.max(2, Math.round(WIDTH * 0.1))
         const channelWidth = (WIDTH - channelGap) / 2
         const baseY = HEIGHT - labelHeight
+
+        // tinggi sebenarnya dari semua segmen + gap, dibatasi agar tidak melebihi kanvas
+        const meterHeight = Math.min(availableHeight + totalGap, HEIGHT - labelHeight)
+
+        // panel hitam dari atas meter sampai ke bawah label
+        const containerTop = baseY - meterHeight
+        const containerHeight = meterHeight + labelHeight
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)"
+
+        // LEFT
+        ctx.fillRect(0, containerTop, channelWidth, containerHeight)
+        // RIGHT
+        ctx.fillRect(channelWidth + channelGap, containerTop, channelWidth, containerHeight)
+
 
         const drawChannel = (startX: number, activeSegments: number) => {
           for (let i = 0; i < SEGMENT_COUNT; i++) {
@@ -149,21 +185,14 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         drawChannel(0, leftSegments)
         drawChannel(channelWidth + channelGap, rightSegments)
 
-        const outlineTop = baseY - (availableHeight + totalGap)
-        const outlineHeight = availableHeight + totalGap
-        const outlineWidth = channelWidth
-        ctx.strokeStyle = "#ffffff"
-        ctx.lineWidth = 1
-        ctx.strokeRect(0.5, outlineTop + 0.5, outlineWidth - 1, outlineHeight - 1)
-        ctx.strokeRect(channelWidth + channelGap + 0.5, outlineTop + 0.5, outlineWidth - 1, outlineHeight - 1)
-
-        const labelFontSize = Math.max(6, labelHeight - 10)
+        const labelFontSize = Math.max(6, Math.round(labelHeight * 0.6))
         ctx.fillStyle = "#ffffff"
         ctx.font = `${labelFontSize}px Arial`
         ctx.textAlign = "center"
         ctx.textBaseline = "bottom"
-        ctx.fillText("L", channelWidth / 2, HEIGHT)
-        ctx.fillText("R", channelWidth + channelGap + channelWidth / 2, HEIGHT)
+        const labelY = HEIGHT - Math.max(2, Math.round(labelHeight * 0.2))
+        ctx.fillText("L", channelWidth / 2, labelY)
+        ctx.fillText("R", channelWidth + channelGap + channelWidth / 2, labelY)
 
         // Silence detection – average the spectrum and track duration
         const normalized = avg / 255
@@ -222,6 +251,9 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
       }
       silenceStartRef.current = null
       reportSilenceChange(false)
+      if (resizeObserverRef.current && container) {
+        resizeObserverRef.current.unobserve(container)
+      }
     }
   }, [videoRef, onSilenceChange])
 
@@ -234,8 +266,12 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
   }, [isMuted])
 
   return (
-    <div className="h-full w-[20px]">
-      <canvas ref={canvasRef} width={20} height={100} className="h-full w-full opacity-80" />
+    <div
+      ref={containerRef}
+      className="h-full"
+      style={{ width: "20px", minWidth: "20px", maxWidth: "20px", minHeight: "80px" }}
+    >
+      <canvas ref={canvasRef} className="h-full w-full opacity-80" />
     </div>
   )
 }
