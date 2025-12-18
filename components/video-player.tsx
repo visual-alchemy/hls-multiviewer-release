@@ -212,7 +212,7 @@ export function VideoPlayer({
       </div>
 
       {/* Audio visualizer (also handles audio routing/muting) */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+      <div className="absolute right-2 top-10 bottom-2 z-10 flex items-center">
         <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} />
       </div>
     </div>

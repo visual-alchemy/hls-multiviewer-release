@@ -142,7 +142,7 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         const rightSegments = toSegments(rightAvg)
 
         const segmentGap = Math.max(1, Math.round(HEIGHT * 0.02))
-        const labelHeight = Math.max(10, Math.round(HEIGHT * 0.18))
+        const labelHeight = Math.min(14, Math.max(10, Math.round(HEIGHT * 0.08)))
         const totalGap = segmentGap * (SEGMENT_COUNT - 1)
         const availableHeight = Math.max(SEGMENT_COUNT, HEIGHT - totalGap - labelHeight)
         const segmentHeight = availableHeight / SEGMENT_COUNT
@@ -185,7 +185,7 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         drawChannel(0, leftSegments)
         drawChannel(channelWidth + channelGap, rightSegments)
 
-        const labelFontSize = Math.max(6, Math.round(labelHeight * 0.6))
+        const labelFontSize = Math.min(8, Math.max(6, Math.round(labelHeight * 0.6)))
         ctx.fillStyle = "#ffffff"
         ctx.font = `${labelFontSize}px Arial`
         ctx.textAlign = "center"
@@ -269,7 +269,7 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
     <div
       ref={containerRef}
       className="h-full"
-      style={{ width: "20px", minWidth: "20px", maxWidth: "20px", minHeight: "80px" }}
+      style={{ width: "20px", minWidth: "20px", maxWidth: "20px", minHeight: "120px", height: "100%" }}
     >
       <canvas ref={canvasRef} className="h-full w-full opacity-80" />
     </div>
