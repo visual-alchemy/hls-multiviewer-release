@@ -13,7 +13,9 @@ A powerful and flexible multiviewer application for monitoring multiple HLS (HTT
 - Automatic retry/recovery for HLS streams after failures
 - Fullscreen mode for immersive viewing
 - Dark theme for better visibility in low-light environments
-- Cross-device synchronization of stream data
+- Export/import stream configurations as JSON
+- Configurable grid layout (rows and columns)
+- Per-stream play/pause controls
 
 ## Technologies Used
 
@@ -28,37 +30,36 @@ A powerful and flexible multiviewer application for monitoring multiple HLS (HTT
 
 1. Clone the repository:
    
-```
-git clone https://github.com/visual-alchemy/hls-multiviewer.git
+```bash
+git clone https://github.com/visual-alchemy/hls-multiviewer-release.git
 ```
 
 2. Navigate to the project directory:
    
-```
-cd hls-multiviewer
+```bash
+cd hls-multiviewer-release
 ```
 
 3. Install dependencies:
 
-```
+```bash
 npm install
 ```
 
-if you found issue for instaling dependency’s use these instead
+If you encounter issues installing dependencies, use this instead:
 
-```
+```bash
 npm install --legacy-peer-deps
 ```
 
 ## Usage
 
 1. Start the development server:
-```
+```bash
 npm run dev
-
 ```
 
-2. Open your browser and visit `http://localhost:3000`
+2. Open your browser and visit `http://localhost:3111`
 
 3. Use the "+" button to add new streams, providing a title and HLS URL for each.
 
@@ -69,24 +70,24 @@ npm run dev
 ## Building for Production
 
 1. Build the project:
-```
+```bash
 npm run build
 ```
 
 2. Start the production server:
-```
+```bash
 npm start
 ```
 
 ## Running with Docker
 
 1. Build the Docker image:
-```
+```bash
 docker build -t hls-multiviewer .
 ```
 
 2. Run the Docker container:
-```
+```bash
 docker run -d -p 3111:3111 hls-multiviewer
 ```
 
@@ -98,4 +99,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](https://github.com/visual-alchemy/hls-multiviewer-v13/blob/main/LICENSE.txt).
+This project is licensed under the [Apache 2.0 License](https://github.com/visual-alchemy/hls-multiviewer-release/blob/main/LICENSE.txt).
