@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.6.0] - 2025-12-31
+
+### Fixed
+- Stream recovery now properly handles both network and media errors
+- Immediate recovery attempts when fatal errors occur (startLoad for network, recoverMediaError for media)
+- Video playback now automatically resumes after recovery attempts
+- Fixed stale URL reference in recovery logic
+
 ### Changed
+- Improved error logging with recovery attempt counter
 - Updated README.md with correct repository URLs, port numbers, and features
 
 ---

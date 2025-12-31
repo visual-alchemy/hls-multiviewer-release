@@ -81,6 +81,21 @@ export function VideoPlayer({
           hls.on(Hls.Events.ERROR, function (event, data) {
             console.log("HLS Error:", data)
             if (data.fatal) {
+              // Immediately attempt recovery based on error type
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  console.log("Network error, attempting startLoad recovery...")
+                  hls.startLoad()
+                  break
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  console.log("Media error, attempting recoverMediaError...")
+                  hls.recoverMediaError()
+                  break
+                default:
+                  console.log("Unknown fatal error type:", data.type)
+                  break
+              }
+              // Set timer for UI indication if recovery doesn't work
               if (!fatalTimerRef.current) {
                 fatalTimerRef.current = setTimeout(() => {
                   setHasFatalError(true)
@@ -156,28 +171,39 @@ export function VideoPlayer({
     }
 
     const hls = hlsRef.current
-    if (!hls) {
+    const video = videoRef.current
+    if (!hls || !video) {
       return
     }
 
     const retryInterval = setInterval(() => {
-      console.log("Attempting to recover stream...")
+      console.log("Attempting to recover stream, attempt:", recoverAttemptsRef.current + 1)
       recoverAttemptsRef.current += 1
+
+      // First try startLoad (handles network errors)
+      hls.startLoad()
+
+      // Also try recoverMediaError (handles media/codec errors)
       hls.recoverMediaError()
+
+      // Every 3rd attempt: full reload of the source
       if (recoverAttemptsRef.current % 3 === 0) {
-        console.log("Reloading HLS source after repeated failures")
+        console.log("Full reload of HLS source after repeated failures")
         hls.stopLoad()
         hls.detachMedia()
-        hls.attachMedia(videoRef.current!)
+        hls.attachMedia(video)
         hls.loadSource(url)
         hls.startLoad()
       }
+
+      // Always try to play after recovery attempt
+      video.play().catch(err => console.log("Play after recovery failed:", err))
     }, 5000)
 
     return () => {
       clearInterval(retryInterval)
     }
-  }, [hasFatalError])
+  }, [hasFatalError, url])
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>

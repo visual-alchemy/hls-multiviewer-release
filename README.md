@@ -10,7 +10,7 @@ A powerful and flexible multiviewer application for monitoring multiple HLS (HTT
 - Add, edit, and delete streams with persistent storage
 - Global mute/unmute functionality that keeps visualizers active
 - Stream health alerting with blinking borders and audible alarms for fatal playback errors or prolonged audio silence
-- Automatic retry/recovery for HLS streams after failures
+- Automatic retry/recovery for HLS streams with smart error detection (network and media errors)
 - Fullscreen mode for immersive viewing
 - Dark theme for better visibility in low-light environments
 - Export/import stream configurations as JSON
