@@ -8,6 +8,7 @@ interface AudioVisualizerProps {
   videoRef: React.RefObject<HTMLVideoElement>
   isMuted: boolean
   onSilenceChange?: (isSilent: boolean) => void
+  hasStreamError?: boolean
 }
 
 const SILENCE_THRESHOLD = 0.01
@@ -15,7 +16,7 @@ const SILENCE_DURATION_MS = 10000
 const SEGMENT_COUNT = 20
 const FRAME_INTERVAL_MS = 33 // ~30 FPS
 
-export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVisualizerProps) {
+export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamError = false }: AudioVisualizerProps) {
   // Reference to the canvas element
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Reference to the container element
@@ -195,10 +196,11 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange }: AudioVis
         ctx.fillText("R", channelWidth + channelGap + channelWidth / 2, labelY)
 
         // Silence detection – average the spectrum and track duration
+        // Skip silence detection when stream has errors (Video Stalled takes priority)
         const normalized = avg / 255
         const videoElement = videoRef.current
         const audioActive = videoElement && !videoElement.paused && videoElement.readyState >= 2
-        if (audioActive && normalized < SILENCE_THRESHOLD) {
+        if (!hasStreamError && audioActive && normalized < SILENCE_THRESHOLD) {
           if (silenceStartRef.current === null) {
             silenceStartRef.current = now
           } else if (now - silenceStartRef.current >= SILENCE_DURATION_MS) {

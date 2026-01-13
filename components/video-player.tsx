@@ -33,12 +33,17 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const [hasFatalError, setHasFatalError] = useState(false)
+  const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const recoverAttemptsRef = useRef(0)
-  const showAlert = hasFatalError || isSilent
-  const alertMessage = hasFatalError ? "Video Stalled" : isSilent ? "No Sound" : null
+  const consecutiveErrorsRef = useRef(0)
+  const lastPlayingTimeRef = useRef<number>(Date.now())
+  const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  // Video Stalled takes priority over No Sound when stream has errors
+  const showAlert = hasFatalError || (isSilent && !hasStreamError)
+  const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
 
   useEffect(() => {
     const video = videoRef.current
@@ -68,15 +73,29 @@ export function VideoPlayer({
 
           const handlePlaying = () => {
             setHasFatalError(false)
+            setHasStreamError(false)
             setIsPaused(false)
             recoverAttemptsRef.current = 0
+            consecutiveErrorsRef.current = 0
+            lastPlayingTimeRef.current = Date.now()
             if (fatalTimerRef.current) {
               clearTimeout(fatalTimerRef.current)
               fatalTimerRef.current = null
             }
           }
 
+          // Track video stall/waiting events
+          const handleStall = () => {
+            const timeSinceLastPlaying = Date.now() - lastPlayingTimeRef.current
+            if (timeSinceLastPlaying > 15000 && !hasFatalError) {
+              console.log("Video stalled for 15+ seconds, triggering alert")
+              setHasFatalError(true)
+            }
+          }
+
           video.addEventListener("playing", handlePlaying)
+          video.addEventListener("stalled", handleStall)
+          video.addEventListener("waiting", handleStall)
 
           hls.on(Hls.Events.ERROR, function (event, data) {
             console.log("HLS Error:", data)
@@ -102,14 +121,28 @@ export function VideoPlayer({
                   fatalTimerRef.current = null
                 }, 10000)
               }
+            } else {
+              // Track non-fatal errors (like fragLoadError with 404s)
+              consecutiveErrorsRef.current += 1
+              setHasStreamError(true)
+              console.log("Non-fatal error count:", consecutiveErrorsRef.current)
+
+              // If too many consecutive non-fatal errors, treat as stalled (lowered threshold for faster detection)
+              if (consecutiveErrorsRef.current >= 3) {
+                console.log("Too many consecutive errors, triggering stall alert")
+                setHasFatalError(true)
+              }
             }
           })
 
           return () => {
             video.removeEventListener("playing", handlePlaying)
+            video.removeEventListener("stalled", handleStall)
+            video.removeEventListener("waiting", handleStall)
             hls.destroy()
             hlsRef.current = null
             recoverAttemptsRef.current = 0
+            consecutiveErrorsRef.current = 0
             if (fatalTimerRef.current) {
               clearTimeout(fatalTimerRef.current)
               fatalTimerRef.current = null
@@ -180,21 +213,17 @@ export function VideoPlayer({
       console.log("Attempting to recover stream, attempt:", recoverAttemptsRef.current + 1)
       recoverAttemptsRef.current += 1
 
-      // First try startLoad (handles network errors)
+      // Reset consecutive error count on recovery attempt
+      consecutiveErrorsRef.current = 0
+
+      // Full reload of manifest every attempt to discover new segments
+      console.log("Reloading HLS manifest...")
+      hls.stopLoad()
+      hls.loadSource(url)
       hls.startLoad()
 
-      // Also try recoverMediaError (handles media/codec errors)
+      // Also try recoverMediaError in case of codec issues
       hls.recoverMediaError()
-
-      // Every 3rd attempt: full reload of the source
-      if (recoverAttemptsRef.current % 3 === 0) {
-        console.log("Full reload of HLS source after repeated failures")
-        hls.stopLoad()
-        hls.detachMedia()
-        hls.attachMedia(video)
-        hls.loadSource(url)
-        hls.startLoad()
-      }
 
       // Always try to play after recovery attempt
       video.play().catch(err => console.log("Play after recovery failed:", err))
@@ -239,7 +268,7 @@ export function VideoPlayer({
 
       {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-10 bottom-2 z-10 flex items-center">
-        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} />
+        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} hasStreamError={hasStreamError} />
       </div>
     </div>
   )
