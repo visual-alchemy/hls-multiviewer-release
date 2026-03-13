@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Hls from "hls.js"
-import { Edit2, Trash2, Pause, Play } from "lucide-react"
+import { Edit2, Trash2, Pause, Play, Bell, BellOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
 
@@ -36,6 +36,7 @@ export function VideoPlayer({
   const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
+  const [isAlarmMuted, setIsAlarmMuted] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const recoverAttemptsRef = useRef(0)
   const consecutiveErrorsRef = useRef(0)
@@ -54,8 +55,8 @@ export function VideoPlayer({
         if (Hls.isSupported()) {
           const hls = new Hls({
             lowLatencyMode: false,
-            liveSyncDurationCount: 4,
-            liveMaxLatencyDurationCount: 20,
+            liveSyncDurationCount: 8,
+            liveMaxLatencyDurationCount: 25,
             backBufferLength: 120,
             maxMaxBufferLength: 90,
             maxBufferSize: 160 * 1024 * 1024,
@@ -96,6 +97,34 @@ export function VideoPlayer({
           video.addEventListener("playing", handlePlaying)
           video.addEventListener("stalled", handleStall)
           video.addEventListener("waiting", handleStall)
+          
+          // Programmatic Autoplay Fallback
+          // Attempt to play normally, if blocked, mute temporarily to bypass browser policy
+          const playPromise = video.play()
+          if (playPromise !== undefined) {
+             playPromise.catch(error => {
+               if (error.name === "NotAllowedError") {
+                 console.log("Autoplay blocked. Temporarily muting video element to bypass policy...");
+                 video.muted = true;
+                 video.play().catch(e => console.error("Muted playback also failed:", e));
+                 
+                 // Restore unmuted state on next user interaction to bring visualizer back
+                 const restoreAudioContext = () => {
+                     if (video.muted) {
+                         video.muted = false;
+                         console.log("User interaction detected, video source unmuted for visualizer.");
+                     }
+                     document.removeEventListener('click', restoreAudioContext);
+                     document.removeEventListener('keydown', restoreAudioContext);
+                     document.removeEventListener('touchstart', restoreAudioContext);
+                 };
+                 
+                 document.addEventListener('click', restoreAudioContext);
+                 document.addEventListener('keydown', restoreAudioContext);
+                 document.addEventListener('touchstart', restoreAudioContext);
+               }
+             });
+          }
 
           hls.on(Hls.Events.ERROR, function (event, data) {
             console.log("HLS Error:", data)
@@ -185,7 +214,7 @@ export function VideoPlayer({
 
   useEffect(() => {
     let audio: HTMLAudioElement | null = null
-    if (showAlert) {
+    if (showAlert && !isAlarmMuted) {
       audio = new Audio("/alert.mp3")
       audio.loop = true
       audio.play().catch(e => console.error("Error playing audio:", e))
@@ -196,7 +225,7 @@ export function VideoPlayer({
         audio.currentTime = 0
       }
     }
-  }, [showAlert])
+  }, [showAlert, isAlarmMuted])
 
   useEffect(() => {
     if (!hasFatalError) {
@@ -253,6 +282,9 @@ export function VideoPlayer({
         <div className="flex justify-between items-center px-2 py-1 bg-black bg-opacity-50">
           <p className="text-white text-sm font-medium truncate">{title}</p>
           <div className="flex gap-1 shrink-0">
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => setIsAlarmMuted(!isAlarmMuted)}>
+              {isAlarmMuted ? <BellOff className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
+            </Button>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={handleTogglePlayback}>
               {isPaused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
             </Button>
