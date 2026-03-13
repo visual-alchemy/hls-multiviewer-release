@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Hls from "hls.js"
-import { Edit2, Trash2, Pause, Play, Bell, BellOff } from "lucide-react"
+import { Edit2, Trash2, Pause, Play, Bell, BellOff, Expand } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
 
@@ -11,9 +11,10 @@ interface VideoPlayerProps {
   title: string
   onEdit: () => void
   onDelete: () => void
-  isMuted: boolean
-  isFullscreen: boolean
-  playbackCommand: {
+  onSolo?: () => void
+  isMuted?: boolean
+  isFullscreen?: boolean
+  playbackCommand?: {
     action: "play" | "pause"
     id: number
   }
@@ -25,8 +26,9 @@ export function VideoPlayer({
   title,
   onEdit,
   onDelete,
-  isMuted,
-  isFullscreen,
+  onSolo,
+  isMuted = false,
+  isFullscreen = false,
   playbackCommand,
   startDelayMs = 0,
 }: VideoPlayerProps) {
@@ -282,6 +284,17 @@ export function VideoPlayer({
         <div className="flex justify-between items-center px-2 py-1 bg-black bg-opacity-50">
           <p className="text-white text-sm font-medium truncate">{title}</p>
           <div className="flex gap-1 shrink-0">
+            {onSolo && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSolo}
+                className="h-6 w-6 text-white hover:bg-black/20"
+                title="Solo Stream"
+              >
+                <Expand className="h-3 w-3" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => setIsAlarmMuted(!isAlarmMuted)}>
               {isAlarmMuted ? <BellOff className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
             </Button>

@@ -1,11 +1,10 @@
 server {
     listen 80;
     resolver 8.8.8.8;
-    server_name localhost;
 
     # Reverse proxy to Next.js app
     location / {
-        proxy_pass http://app:3111;
+        proxy_pass http://app-primary-2:3111;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

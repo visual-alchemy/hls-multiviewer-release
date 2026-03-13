@@ -235,10 +235,17 @@ export default function MultiViewer() {
     })
   }
 
+  // State to track if a specific stream is soloed (maximized)
+  const [soloStreamId, setSoloStreamId] = useState<string | null>(null)
+
+  const toggleSoloStream = (id: string) => {
+    setSoloStreamId((prevId) => (prevId === id ? null : id))
+  }
+
   return (
-    <div className={`min-h-screen bg-[#1a1b26] ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
+    <div className={`min-h-screen bg-[#1a1b26] flex flex-col ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
-      <div className={`flex items-center mb-6 ${isFullscreen ? "hidden" : ""}`}>
+      <div className={`flex items-center shrink-0 mb-4 ${isFullscreen || soloStreamId ? "hidden" : ""}`}>
         <div className="flex items-center">
           <Image
             src="https://i.ibb.co.com/tT7cmrcv/Logo-Vidio-Apps.png"
@@ -293,24 +300,46 @@ export default function MultiViewer() {
 
       {/* Grid of video players */}
       <div
-        className={`grid gap-2 w-full ${isFullscreen ? "h-screen auto-rows-fr overflow-auto p-2" : "gap-4"}`}
-        style={{
-          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
-        }}
+        className={
+          soloStreamId
+            ? "flex-grow w-full h-full relative" // Solo mode full container
+            : `grid gap-2 w-full flex-grow ${isFullscreen ? "h-screen auto-rows-fr overflow-auto p-2" : "gap-4"}`
+        }
+        style={
+          soloStreamId
+            ? undefined
+            : {
+                gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
+              }
+        }
       >
         {Array.from({ length: gridRows * gridColumns }).map((_, index) => {
           const stream = streams[index]
+
+          if (soloStreamId && stream?.id !== soloStreamId) {
+            // Unmount hidden streams to save bandwidth and CPU when soloing another stream
+            return null
+          }
+
           return (
-            <div key={index} className={`${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`}>
+            <div
+              key={stream ? stream.id : index}
+              className={
+                soloStreamId
+                  ? "w-full h-full absolute inset-0" // Solo mode container overrides
+                  : `${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`
+              }
+            >
               {stream ? (
                 <VideoPlayer
                   title={stream.title}
                   url={stream.url}
                   onEdit={() => handleEditStream(stream.id)}
                   onDelete={() => handleDeleteStream(stream.id)}
+                  onSolo={() => toggleSoloStream(stream.id)}
                   isMuted={globalMute}
-                  isFullscreen={isFullscreen}
+                  isFullscreen={isFullscreen || !!soloStreamId}
                   playbackCommand={playbackCommand}
                   startDelayMs={staggerSeed + index * 300}
                 />
@@ -325,7 +354,7 @@ export default function MultiViewer() {
       </div>
 
       {/* Fullscreen controls */}
-      {isFullscreen && (
+      {isFullscreen && !soloStreamId && (
         <div className="fixed bottom-4 right-4 z-50 flex gap-2">
           <Button
             variant="ghost"

@@ -1,0 +1,17 @@
+[
+  {
+    "title": "SCTV",
+    "url": "http://192.168.135.6:8080/primary/etslive-v3-vidio-com-tokenized.akamaized.net/stream/204/file/master.m3u8?hdnts=exp=1799834392~acl=/stream/204/file/master.m3u8!/stream/204/file/*/aac/*!/stream/204/file/*/*-1080p/*!/stream/204/file/*/*-720p/*!/stream/204/file/*/*-480p/*!/stream/204/file/*/*-360p/*~id=93224450~hmac=4f15d79a6828994e8606995bb71c7761cdac30ad52d583b2ec5edb00d1d5fc73",
+    "id": "1773392259944"
+  },
+  {
+    "id": "1773392280258",
+    "title": "205 | IVM",
+    "url": "http://192.168.135.6:8080/primary/etslive-v3-vidio-com-tokenized.akamaized.net/stream/205/file/master.m3u8?hdnts=exp=1799834552~acl=/stream/205/file/master.m3u8!/stream/205/file/*/aac/*!/stream/205/file/*/*-1080p/*!/stream/205/file/*/*-720p/*!/stream/205/file/*/*-480p/*!/stream/205/file/*/*-360p/*~id=93224450~hmac=d2898a59db04fab20b9d224bcf98c45f974f984f5cb8a3f56682490cbbc0e198"
+  },
+  {
+    "title": "206 | Moji",
+    "url": "http://192.168.135.6:8080/primary/etslive-v3-vidio-com-tokenized.akamaized.net/stream/206/file/master.m3u8?hdnts=exp=1799834594~acl=/stream/206/file/master.m3u8!/stream/206/file/*/aac/*!/stream/206/file/*/*-1080p/*!/stream/206/file/*/*-720p/*!/stream/206/file/*/*-480p/*!/stream/206/file/*/*-360p/*~id=93224450~hmac=f01d5bf8c1d8d18a137bf8e1a306fc6eb0230f3d9b1001a5a873f9db2189790e",
+    "id": "1773392307176"
+  }
+]
