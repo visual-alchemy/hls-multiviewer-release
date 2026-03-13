@@ -4,7 +4,7 @@ server {
 
     # Reverse proxy to Next.js app
     location / {
-        proxy_pass http://app-primary-1:3111;
+        proxy_pass http://NEXTJS_UPSTREAM;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
