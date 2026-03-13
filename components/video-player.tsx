@@ -14,6 +14,7 @@ interface VideoPlayerProps {
   onSolo?: () => void
   isMuted?: boolean
   isFullscreen?: boolean
+  isSoloed?: boolean
   playbackCommand?: {
     action: "play" | "pause"
     id: number
@@ -29,6 +30,7 @@ export function VideoPlayer({
   onSolo,
   isMuted = false,
   isFullscreen = false,
+  isSoloed = false,
   playbackCommand,
   startDelayMs = 0,
 }: VideoPlayerProps) {
@@ -86,6 +88,15 @@ export function VideoPlayer({
               fatalTimerRef.current = null
             }
           }
+
+          // Initial quality selection based on mode
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              if (isSoloed) {
+                  hls.currentLevel = -1 // Auto (highest available)
+              } else {
+                  hls.currentLevel = 0 // Lowest quality to save bandwidth
+              }
+          })
 
           // Track video stall/waiting events
           const handleStall = () => {
@@ -202,6 +213,20 @@ export function VideoPlayer({
       setIsPaused(true)
     }
   }, [playbackCommand])
+
+  // Dynamically switch quality when solo mode changes
+  useEffect(() => {
+    const hls = hlsRef.current
+    if (!hls) return
+
+    if (isSoloed) {
+      console.log(`Setting stream ${title} to Auto Quality (Solo Mode)`)
+      hls.currentLevel = -1 // Auto
+    } else {
+      console.log(`Setting stream ${title} to Low Quality (Grid Mode)`)
+      hls.currentLevel = 0 // Lowest
+    }
+  }, [isSoloed, title])
 
   const handleTogglePlayback = () => {
     const video = videoRef.current

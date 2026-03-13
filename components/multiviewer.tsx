@@ -340,6 +340,7 @@ export default function MultiViewer() {
                   onSolo={() => toggleSoloStream(stream.id)}
                   isMuted={globalMute}
                   isFullscreen={isFullscreen || !!soloStreamId}
+                  isSoloed={soloStreamId === stream.id}
                   playbackCommand={playbackCommand}
                   startDelayMs={staggerSeed + index * 300}
                 />
