@@ -58,16 +58,20 @@ export function VideoPlayer({
       if (url.includes(".m3u8")) {
         if (Hls.isSupported()) {
           const hls = new Hls({
+            enableWorker: true,
             lowLatencyMode: false,
+            backOffMax: 10000,
+            nudgeMaxRetries: 5,
             liveSyncDurationCount: 8,
             liveMaxLatencyDurationCount: 25,
+            liveDurationInfinity: true,
             backBufferLength: 120,
             maxMaxBufferLength: 90,
             maxBufferSize: 160 * 1024 * 1024,
             fragLoadingRetryDelay: 1000,
-            fragLoadingMaxRetry: 5,
+            fragLoadingMaxRetry: 10,
             manifestLoadingRetryDelay: 1000,
-            manifestLoadingMaxRetry: 5,
+            manifestLoadingMaxRetry: 10,
             xhrSetup: function (xhr, url) {
               xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
             },
@@ -140,8 +144,8 @@ export function VideoPlayer({
           }
 
           hls.on(Hls.Events.ERROR, function (event, data) {
-            console.log("HLS Error:", data)
             if (data.fatal) {
+              console.error(`Fatal HLS Error (${title}):`, data.details)
               // Immediately attempt recovery based on error type
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
@@ -165,14 +169,20 @@ export function VideoPlayer({
               }
             } else {
               // Track non-fatal errors (like fragLoadError with 404s)
-              consecutiveErrorsRef.current += 1
-              setHasStreamError(true)
-              console.log("Non-fatal error count:", consecutiveErrorsRef.current)
+              // We only count network errors or actual buffer gaps as "consecutive" triggers
+              // Ignore bufferStalledError as it is often self-healing and too frequent
+              if (data.details !== 'bufferStalledError' && 
+                  (data.type === Hls.ErrorTypes.NETWORK_ERROR || data.details === 'bufferSeekOverHole')) {
+                consecutiveErrorsRef.current += 1
+                setHasStreamError(true)
+                console.log(`Non-fatal error count (${title}):`, consecutiveErrorsRef.current, data.details)
 
-              // If too many consecutive non-fatal errors, treat as stalled (lowered threshold for faster detection)
-              if (consecutiveErrorsRef.current >= 3) {
-                console.log("Too many consecutive errors, triggering stall alert")
-                setHasFatalError(true)
+                // If too many consecutive non-fatal errors, treat as stalled
+                // Raised threshold from 3 to 10 for more patient recovery
+                if (consecutiveErrorsRef.current >= 10) {
+                  console.log(`Too many consecutive errors for ${title}, triggering stall alert`)
+                  setHasFatalError(true)
+                }
               }
             }
           })
@@ -244,7 +254,9 @@ export function VideoPlayer({
     if (showAlert && !isAlarmMuted) {
       audio = new Audio("/alert.mp3")
       audio.loop = true
-      audio.play().catch(e => console.error("Error playing audio:", e))
+      audio.play().catch(e => {
+          // Silent catch for play interruptions (AbortError)
+      })
     }
     return () => {
       if (audio) {
