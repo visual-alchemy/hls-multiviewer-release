@@ -60,8 +60,6 @@ export function VideoPlayer({
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            backOffMax: 10000,
-            nudgeMaxRetries: 5,
             liveSyncDurationCount: 8,
             liveMaxLatencyDurationCount: 25,
             liveDurationInfinity: true,
