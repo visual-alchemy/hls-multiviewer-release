@@ -37,6 +37,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const [hasFatalError, setHasFatalError] = useState(false)
+  const hasFatalErrorRef = useRef(false) // mirrors hasFatalError for use in stale closures
   const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -80,6 +81,7 @@ export function VideoPlayer({
 
           const handlePlaying = () => {
             setHasFatalError(false)
+            hasFatalErrorRef.current = false
             setHasStreamError(false)
             setIsPaused(false)
             recoverAttemptsRef.current = 0
@@ -91,20 +93,13 @@ export function VideoPlayer({
             }
           }
 
-          // Initial quality selection based on mode
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              if (isSoloed) {
-                  hls.currentLevel = -1 // Auto (highest available)
-              } else {
-                  hls.currentLevel = 0 // Lowest quality to save bandwidth
-              }
-          })
-
           // Track video stall/waiting events
+          // Uses a ref instead of state to avoid stale closure issues
           const handleStall = () => {
             const timeSinceLastPlaying = Date.now() - lastPlayingTimeRef.current
-            if (timeSinceLastPlaying > 15000 && !hasFatalError) {
+            if (timeSinceLastPlaying > 15000 && !hasFatalErrorRef.current) {
               console.log("Video stalled for 15+ seconds, triggering alert")
+              hasFatalErrorRef.current = true
               setHasFatalError(true)
             }
           }
