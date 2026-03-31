@@ -9,6 +9,18 @@ import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { GridConfigDialog } from "@/components/grid-config-dialog"
 import { Button } from "@/components/ui/button"
 import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { useToast } from "@/components/ui/use-toast"
+import { Toaster } from "@/components/ui/toaster"
 
 // Define the structure of a stream object
 interface Stream {
@@ -38,6 +50,10 @@ export default function MultiViewer() {
   const [isGridConfigOpen, setIsGridConfigOpen] = useState(false)
   // State for add stream dialog
   const [isAddStreamOpen, setIsAddStreamOpen] = useState(false)
+  // State for import confirmation dialog
+  const [pendingImport, setPendingImport] = useState<Stream[] | null>(null)
+  const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false)
+  const { toast } = useToast()
 
   // Load streams from the API when component mounts
   useEffect(() => {
@@ -180,12 +196,14 @@ export default function MultiViewer() {
     linkElement.click()
   }
 
-  // Function to import streams
+  // Function to import streams — step 1: parse file and show confirmation
   const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
+    // Reset input value so re-selecting same file still triggers onChange
+    event.target.value = ""
     if (file) {
       const reader = new FileReader()
-      reader.onload = async (e) => {
+      reader.onload = (e) => {
         try {
           const content = e.target?.result
           if (typeof content === "string") {
@@ -193,30 +211,56 @@ export default function MultiViewer() {
             if (!Array.isArray(importedStreams)) {
               throw new Error("Imported data is not an array")
             }
-            const response = await fetch("/api/streams/import", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(importedStreams),
-            })
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`)
-            }
-            const updatedStreams = await response.json()
-            setStreams(updatedStreams)
+            // Store parsed data and show confirmation before sending to API
+            setPendingImport(importedStreams)
+            setIsImportConfirmOpen(true)
           }
         } catch (error) {
-          console.error("Error importing streams:", error)
-          // You might want to show this error to the user in the UI
-          alert(`Error importing streams: ${error instanceof Error ? error.message : String(error)}`)
+          console.error("Error reading import file:", error)
+          toast({
+            title: "Invalid file",
+            description: error instanceof Error ? error.message : "The selected file is not valid JSON.",
+            variant: "destructive",
+          })
         }
       }
-      reader.onerror = (error) => {
-        console.error("FileReader error:", error)
-        alert("Error reading file. Please try again.")
+      reader.onerror = () => {
+        toast({
+          title: "File read error",
+          description: "Could not read the file. Please try again.",
+          variant: "destructive",
+        })
       }
       reader.readAsText(file)
+    }
+  }
+
+  // Step 2: user confirmed — send to API and replace streams
+  const handleImportConfirm = async () => {
+    if (!pendingImport) return
+    try {
+      const response = await fetch("/api/streams/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pendingImport),
+      })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const updatedStreams = await response.json()
+      setStreams(updatedStreams)
+      toast({
+        title: "Streams imported",
+        description: `${updatedStreams.length} stream${updatedStreams.length !== 1 ? "s" : ""} loaded successfully.`,
+      })
+    } catch (error) {
+      console.error("Error importing streams:", error)
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Something went wrong.",
+        variant: "destructive",
+      })
+    } finally {
+      setPendingImport(null)
+      setIsImportConfirmOpen(false)
     }
   }
 
@@ -398,6 +442,31 @@ export default function MultiViewer() {
         initialRows={gridRows}
         initialColumns={gridColumns}
       />
+
+      {/* Import confirmation dialog */}
+      <AlertDialog open={isImportConfirmOpen} onOpenChange={setIsImportConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace current streams?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will replace all {streams.length} current stream{streams.length !== 1 ? "s" : ""} with{" "}
+              <strong>{pendingImport?.length ?? 0} stream{(pendingImport?.length ?? 0) !== 1 ? "s" : ""}</strong> from the imported file.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setPendingImport(null); setIsImportConfirmOpen(false) }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleImportConfirm}>
+              Replace
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Toast notifications */}
+      <Toaster />
     </div>
   )
 }
