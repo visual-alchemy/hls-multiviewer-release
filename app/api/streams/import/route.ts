@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getStreams, saveStreams, type Stream } from "@/lib/streams"
+import { saveStreams, type Stream } from "@/lib/streams"
 
 export async function POST(request: Request) {
   try {
@@ -7,8 +7,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(importedStreams)) {
       return NextResponse.json({ error: "Invalid data format" }, { status: 400 })
     }
-    const currentStreams = getStreams()
-    const updatedStreams = [...currentStreams, ...importedStreams]
+    const updatedStreams = importedStreams
     saveStreams(updatedStreams)
     return NextResponse.json(updatedStreams)
   } catch (error) {
