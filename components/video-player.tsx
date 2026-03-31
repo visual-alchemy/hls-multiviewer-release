@@ -39,17 +39,19 @@ export function VideoPlayer({
   const [hasFatalError, setHasFatalError] = useState(false)
   const hasFatalErrorRef = useRef(false) // mirrors hasFatalError for use in stale closures
   const [hasStreamError, setHasStreamError] = useState(false)
+  const [isTokenExpired, setIsTokenExpired] = useState(false) // 403: stream offline/token expired
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [isAlarmMuted, setIsAlarmMuted] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
   const recoverAttemptsRef = useRef(0)
   const consecutiveErrorsRef = useRef(0)
   const lastPlayingTimeRef = useRef<number>(Date.now())
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // Video Stalled takes priority over No Sound when stream has errors
-  const showAlert = hasFatalError || (isSilent && !hasStreamError)
-  const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
+  const showAlert = hasFatalError || isTokenExpired || (isSilent && !hasStreamError)
+  const alertMessage = isTokenExpired ? "Stream Offline" : hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
 
   useEffect(() => {
     const video = videoRef.current
@@ -83,10 +85,16 @@ export function VideoPlayer({
             setHasFatalError(false)
             hasFatalErrorRef.current = false
             setHasStreamError(false)
+            setIsTokenExpired(false)
             setIsPaused(false)
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
             lastPlayingTimeRef.current = Date.now()
+            // Immediately clear the retry interval so it stops as soon as stream recovers
+            if (retryIntervalRef.current) {
+              clearInterval(retryIntervalRef.current)
+              retryIntervalRef.current = null
+            }
             if (fatalTimerRef.current) {
               clearTimeout(fatalTimerRef.current)
               fatalTimerRef.current = null
@@ -161,6 +169,17 @@ export function VideoPlayer({
                 }, 10000)
               }
             } else {
+              // Check for 403: permanent token expiry / stream taken offline
+              // No point retrying — stop immediately and show "Stream Offline"
+              const httpCode = (data.response as any)?.code
+              if (httpCode === 403) {
+                console.warn(`Stream ${title}: received 403, token expired or stream offline. Stopping retries.`)
+                setIsTokenExpired(true)
+                hasFatalErrorRef.current = true // prevent stall timer firing on top
+                hls.stopLoad()
+                return
+              }
+
               // Track non-fatal errors (like fragLoadError with 404s)
               // We only count network errors or actual buffer gaps as "consecutive" triggers
               // Ignore bufferStalledError as it is often self-healing and too frequent
@@ -260,7 +279,8 @@ export function VideoPlayer({
   }, [showAlert, isAlarmMuted])
 
   useEffect(() => {
-    if (!hasFatalError) {
+    // Don't retry if: no error, or token expired (permanent — retrying is useless on 403)
+    if (!hasFatalError || isTokenExpired) {
       return
     }
 
@@ -290,10 +310,13 @@ export function VideoPlayer({
       video.play().catch(err => console.log("Play after recovery failed:", err))
     }, 5000)
 
+    retryIntervalRef.current = retryInterval
+
     return () => {
       clearInterval(retryInterval)
+      retryIntervalRef.current = null
     }
-  }, [hasFatalError, url])
+  }, [hasFatalError, isTokenExpired, url])
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>

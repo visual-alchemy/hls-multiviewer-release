@@ -21,8 +21,10 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Reference to the container element
   const containerRef = useRef<HTMLDivElement>(null)
-  // Reference to the animation frame
+  // Reference to the animation frame (visuals only)
   const animationRef = useRef<number>()
+  // Reference to the silence detection interval (runs even when tab is hidden)
+  const silenceIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // References to the audio analysers
   const leftAnalyserRef = useRef<AnalyserNode>()
   const rightAnalyserRef = useRef<AnalyserNode>()
@@ -136,7 +138,6 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
 
         const leftAvg = leftData.reduce((s, v) => s + v, 0) / (bufferLength || 1)
         const rightAvg = rightData.reduce((s, v) => s + v, 0) / (bufferLength || 1)
-        const avg = (leftAvg + rightAvg) / 2
         const toSegments = (value: number) =>
           Math.max(0, Math.min(SEGMENT_COUNT, Math.round((value / 255) * SEGMENT_COUNT)))
         const leftSegments = toSegments(leftAvg)
@@ -195,12 +196,25 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
         ctx.fillText("L", channelWidth / 2, labelY)
         ctx.fillText("R", channelWidth + channelGap + channelWidth / 2, labelY)
 
-        // Silence detection – average the spectrum and track duration
-        // Skip silence detection when stream has errors (Video Stalled takes priority)
-        const normalized = avg / 255
+        animationRef.current = requestAnimationFrame(draw)
+      }
+
+      // Silence detection runs on setInterval — reliable even when the tab is backgrounded
+      // (requestAnimationFrame throttles to ~1fps in hidden tabs, setInterval does not)
+      silenceIntervalRef.current = setInterval(() => {
+        if (!leftAnalyserRef.current || !rightAnalyserRef.current || audioContextRef.current?.state === "closed") return
+        const silenceCheckData = new Uint8Array(bufferLength)
+        leftAnalyserRef.current.getByteFrequencyData(silenceCheckData)
+        const leftSilenceAvg = silenceCheckData.reduce((s, v) => s + v, 0) / (bufferLength || 1)
+        rightAnalyserRef.current.getByteFrequencyData(silenceCheckData)
+        const rightSilenceAvg = silenceCheckData.reduce((s, v) => s + v, 0) / (bufferLength || 1)
+        const silenceAvg = ((leftSilenceAvg + rightSilenceAvg) / 2) / 255
+
         const videoElement = videoRef.current
         const audioActive = videoElement && !videoElement.paused && videoElement.readyState >= 2
-        if (!hasStreamError && audioActive && normalized < SILENCE_THRESHOLD) {
+        const now = performance.now()
+
+        if (!hasStreamError && audioActive && silenceAvg < SILENCE_THRESHOLD) {
           if (silenceStartRef.current === null) {
             silenceStartRef.current = now
           } else if (now - silenceStartRef.current >= SILENCE_DURATION_MS) {
@@ -210,9 +224,7 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
           silenceStartRef.current = null
           reportSilenceChange(false)
         }
-
-        animationRef.current = requestAnimationFrame(draw)
-      }
+      }, 100) // poll every 100ms — accurate enough for 10s silence threshold
 
       draw()
     }
@@ -226,6 +238,10 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
 
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
+      }
+      if (silenceIntervalRef.current) {
+        clearInterval(silenceIntervalRef.current)
+        silenceIntervalRef.current = null
       }
       if (sourceRef.current) {
         sourceRef.current.disconnect()
