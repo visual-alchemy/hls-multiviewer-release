@@ -14,6 +14,11 @@ services:
       - ./data_primary_1:/app/data
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   proxy-primary-1:
     image: openresty/openresty:alpine
@@ -30,6 +35,11 @@ services:
       - app-primary-1
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ==========================================
   # EVENT 1 (Port 3115)
@@ -46,6 +56,11 @@ services:
       - ./data_event_1:/app/data
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   proxy-event-1:
     image: openresty/openresty:alpine
@@ -62,6 +77,11 @@ services:
       - app-event-1
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ==========================================
   # KONTEN 1 (Port 3116)
@@ -78,6 +98,11 @@ services:
       - ./data_konten_1:/app/data
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   proxy-konten-1:
     image: openresty/openresty:alpine
@@ -94,6 +119,11 @@ services:
       - app-konten-1
     networks:
       - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   multiviewer:
