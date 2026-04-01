@@ -39,19 +39,19 @@ export function VideoPlayer({
   const [hasFatalError, setHasFatalError] = useState(false)
   const hasFatalErrorRef = useRef(false) // mirrors hasFatalError for use in stale closures
   const [hasStreamError, setHasStreamError] = useState(false)
-  const [isTokenExpired, setIsTokenExpired] = useState(false) // 403: stream offline/token expired
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [isAlarmMuted, setIsAlarmMuted] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
+  const isPermanentlyStoppedRef = useRef(false) // set on 403 — prevents retry loop firing
   const recoverAttemptsRef = useRef(0)
   const consecutiveErrorsRef = useRef(0)
   const lastPlayingTimeRef = useRef<number>(Date.now())
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // Video Stalled takes priority over No Sound when stream has errors
-  const showAlert = hasFatalError || isTokenExpired || (isSilent && !hasStreamError)
-  const alertMessage = isTokenExpired ? "Stream Offline" : hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
+  const showAlert = hasFatalError || (isSilent && !hasStreamError)
+  const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
 
   useEffect(() => {
     const video = videoRef.current
@@ -85,7 +85,6 @@ export function VideoPlayer({
             setHasFatalError(false)
             hasFatalErrorRef.current = false
             setHasStreamError(false)
-            setIsTokenExpired(false)
             setIsPaused(false)
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
@@ -104,8 +103,10 @@ export function VideoPlayer({
           // Track video stall/waiting events
           // Uses a ref instead of state to avoid stale closure issues
           const handleStall = () => {
+            // Guard: if alarm already active, do nothing (prevents log spam from repeated stalled/waiting events)
+            if (hasFatalErrorRef.current) return
             const timeSinceLastPlaying = Date.now() - lastPlayingTimeRef.current
-            if (timeSinceLastPlaying > 15000 && !hasFatalErrorRef.current) {
+            if (timeSinceLastPlaying > 15000) {
               console.log("Video stalled for 15+ seconds, triggering alert")
               hasFatalErrorRef.current = true
               setHasFatalError(true)
@@ -170,12 +171,13 @@ export function VideoPlayer({
               }
             } else {
               // Check for 403: permanent token expiry / stream taken offline
-              // No point retrying — stop immediately and show "Stream Offline"
+              // No point retrying — stop immediately and show "Video Stalled"
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
                 console.warn(`Stream ${title}: received 403, token expired or stream offline. Stopping retries.`)
-                setIsTokenExpired(true)
-                hasFatalErrorRef.current = true // prevent stall timer firing on top
+                hasFatalErrorRef.current = true // prevent stall timer/handleStall firing on top
+                isPermanentlyStoppedRef.current = true // block retry useEffect
+                setHasFatalError(true)
                 hls.stopLoad()
                 return
               }
@@ -279,8 +281,7 @@ export function VideoPlayer({
   }, [showAlert, isAlarmMuted])
 
   useEffect(() => {
-    // Don't retry if: no error, or token expired (permanent — retrying is useless on 403)
-    if (!hasFatalError || isTokenExpired) {
+    if (!hasFatalError || isPermanentlyStoppedRef.current) {
       return
     }
 
@@ -316,7 +317,7 @@ export function VideoPlayer({
       clearInterval(retryInterval)
       retryIntervalRef.current = null
     }
-  }, [hasFatalError, isTokenExpired, url])
+  }, [hasFatalError, url])
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
