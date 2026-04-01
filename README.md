@@ -1,101 +1,162 @@
 # HLS Multiviewer
 
-A powerful and flexible multiviewer application for monitoring multiple HLS (HTTP Live Streaming) video streams simultaneously.
+A production-grade multiviewer application for monitoring multiple HLS (HTTP Live Streaming) video streams simultaneously, with real-time audio metering and a smart alarm system.
+
+---
 
 ## Features
 
-- Display up to 25 concurrent video streams in a responsive grid layout
-- Support for HLS (HTTP Live Streaming) video format
-- Real-time audio visualization for each stream
-- Add, edit, and delete streams with persistent storage
-- Global mute/unmute functionality that keeps visualizers active
-- Stream health alerting with blinking borders and audible alarms for fatal playback errors or prolonged audio silence
-- Automatic retry/recovery for HLS streams with smart error detection (network and media errors)
-- Fullscreen mode for immersive viewing
-- Dark theme for better visibility in low-light environments
-- Export/import stream configurations as JSON
+### Stream Management
+- Display multiple concurrent video streams in a configurable grid layout
+- Add, edit, and delete streams with server-side persistent storage (`streams.json`)
+- Export stream configuration as JSON
+- Import stream configuration from JSON — with a confirmation dialog that shows how many streams will be replaced
 - Configurable grid layout (rows and columns)
 - Per-stream play/pause controls
+- Solo mode: expand a single stream to full view
 
-## Technologies Used
+### Playback & Quality
+- Full HLS.js integration with Web Worker enabled for stable decoding
+- Automatic quality switching: lowest quality in grid view, auto (highest) in solo mode
+- Staggered stream startup to avoid simultaneous bandwidth spikes
+- Programmatic autoplay fallback for browsers that block autoplay
 
-- Next.js
-- React
-- TypeScript
-- Tailwind CSS
-- HLS.js
-- Web Audio API
+### Audio Metering
+- Real-time stereo L/R audio meter per stream using the Web Audio API
+- Reads actual decoded PCM audio from the HLS stream (not simulated)
+- Silence detection runs on a `setInterval` (100ms polling) — works correctly even when the browser tab is in the background
+
+### Alarm System
+Three distinct alarm states with visual overlay + audible alert:
+
+| Alarm | Trigger |
+|---|---|
+| **Stream Offline** | Server returns HTTP 403 (token expired / stream taken offline) |
+| **Video Stalled** | Video freezes for 15+ seconds, or 10+ consecutive network errors |
+| **No Sound** | Audio level below threshold for 10+ continuous seconds |
+
+- Alarm sound can be muted per-stream via the bell icon
+- Recovery loop runs every 5 seconds when "Video Stalled" — stops immediately when the stream resumes
+- 403 errors stop all retries immediately (no retry spam on a dead token)
+
+---
+
+## Architecture
+
+### Multi-Dashboard Deployment
+
+The project supports multiple isolated dashboard instances, each with its own:
+- Dedicated port
+- Isolated Docker volume (stream data does not bleed between instances)
+- NGINX reverse proxy that also proxies HLS segment requests to bypass browser CORS restrictions
+
+| Instance | Port | Data Volume |
+|---|---|---|
+| `primary-1` | `3111` | `./data_primary_1` |
+| `event-1` | `3115` | `./data_event_1` |
+| `konten-1` | `3116` | `./data_konten_1` |
+
+### NGINX Proxy
+
+Each instance runs an OpenResty (NGINX) proxy at the public port. It:
+1. Forwards all UI/API requests to the Next.js app container
+2. Proxies HLS CDN requests (e.g. `/primary/`, `/geo-id/`, `/hls-b/`) to Akamai on the server side, which avoids browser CORS restrictions for tokenized stream URLs
+
+### Stream URL Formats
+
+| Format | CORS Extension Needed? |
+|---|---|
+| Direct Akamai URL (`https://etslive-...akamaized.net/...`) | ✅ Yes — browser sees it as cross-origin |
+| Proxied URL (`/primary/etslive-...`) | ❌ No — browser sees it as same-origin, NGINX handles the rest |
+
+**Use the proxied format** (starting with `/primary/`, `/geo-id/`, etc.) whenever possible to avoid needing a CORS browser extension.
+
+---
 
 ## Installation
 
-1. Clone the repository:
-   
+### Local Development
+
 ```bash
 git clone https://github.com/visual-alchemy/hls-multiviewer-release.git
-```
-
-2. Navigate to the project directory:
-   
-```bash
 cd hls-multiviewer-release
-```
-
-3. Install dependencies:
-
-```bash
 npm install
-```
-
-If you encounter issues installing dependencies, use this instead:
-
-```bash
-npm install --legacy-peer-deps
-```
-
-## Usage
-
-1. Start the development server:
-```bash
 npm run dev
 ```
 
-2. Open your browser and visit `http://localhost:3111`
+> If you encounter peer dependency conflicts:
+> ```bash
+> npm install --legacy-peer-deps
+> ```
 
-3. Use the "+" button to add new streams, providing a title and HLS URL for each.
+Open your browser at `http://localhost:3111`.
 
-4. Interact with individual streams using the on-screen controls.
+---
 
-5. Use the global controls at the top for mute/unmute and fullscreen mode.
+### Docker (Single Instance)
 
-## Building for Production
-
-1. Build the project:
 ```bash
-npm run build
-```
-
-2. Start the production server:
-```bash
-npm start
-```
-
-## Running with Docker
-
-1. Build the Docker image:
-```bash
+# Build
 docker build -t hls-multiviewer .
+
+# Run
+docker run -d -p 3111:3111 -v $(pwd)/data:/app/data hls-multiviewer
 ```
 
-2. Run the Docker container:
+---
+
+### Docker Compose (Multi-Instance)
+
 ```bash
-docker run -d -p 3111:3111 hls-multiviewer
+# Start all instances (primary-1, event-1, konten-1)
+docker compose up -d
+
+# Start specific instance only
+docker compose up -d app-primary-1 proxy-primary-1
+
+# Rebuild without cache
+docker compose build --no-cache
+docker compose up -d
 ```
 
-3. Open your browser and visit `http://localhost:3111`
+Each instance's stream configuration is stored in its respective `./data_<name>/streams.json` file and persists across container restarts.
 
-## Contributing
+#### Log Management
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Docker log rotation is configured per container:
+- **Max file size**: 10 MB
+- **Max files**: 3 (rotated)
+- **Max total per container**: ~30 MB
+
+To manually clean existing large log files without restarting:
+```bash
+sudo truncate -s 0 /var/lib/docker/containers/<container-id>/<container-id>-json.log
+```
+
+---
+
+## Usage
+
+1. **Add streams** using the `+` button — provide a title and an HLS URL (`.m3u8`)
+2. **Import** a JSON configuration using the upload icon — a confirmation dialog will show how many streams will be replaced
+3. **Export** the current configuration using the download icon
+4. **Solo** a stream by clicking the expand icon — this switches to high quality and fills the view
+5. **Mute/unmute** all streams globally, or mute alarm sounds per-stream via the bell icon
+6. **Configure the grid** layout using the grid icon
+
+---
+
+## Technologies
+
+- **Next.js 14** (App Router)
+- **React** + **TypeScript**
+- **HLS.js** — HLS playback with Web Worker
+- **Web Audio API** — real-time stereo audio metering
+- **OpenResty / NGINX** — reverse proxy + HLS CORS proxy
+- **Docker / Docker Compose** — multi-instance orchestration
+- **Tailwind CSS** + **shadcn/ui**
+
+---
 
 ## License
 

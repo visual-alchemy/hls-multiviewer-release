@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.0.0] - 2026-04-01
+
+### Added
+- **Multi-instance Docker deployment**: isolated instances (`primary-1` port 3111, `event-1` port 3115, `konten-1` port 3116) each with dedicated Docker volumes
+- **Stream Offline alarm**: detects HTTP 403 responses (expired token / stream taken down) and shows "Stream Offline" label — stops all retries immediately instead of hammering the CDN
+- **Import confirmation dialog**: before replacing streams, shows an `AlertDialog` with the count of current vs imported streams. User must confirm before any data is overwritten
+- **Toast notifications**: success and error feedback after import operations using shadcn/ui Toaster
+- **Docker log rotation**: `json-file` driver with `max-size: 10m` and `max-file: 3` per container to prevent unbounded log growth
+
+### Fixed
+- **Import replaces instead of appending**: `POST /api/streams/import` now overwrites the current stream list entirely instead of merging
+- **Stale closure in `handleStall`**: added `hasFatalErrorRef` to mirror `hasFatalError` state, preventing double-trigger of alerts after recovery
+- **Recovery loop not stopping on resume**: added `retryIntervalRef` so `handlePlaying` immediately clears the 5s retry interval the moment the stream comes back — no more extra retry fires after recovery
+- **Audio visualizer silenced in background tabs**: silence detection moved from `requestAnimationFrame` (throttled to ~1fps in hidden tabs) to `setInterval(100ms)` — alarm now fires correctly even when the tab is not in focus
+- **Re-importing same file**: reset `input.value` after file selection so the same JSON file can be imported again without re-opening the picker
+
+### Changed
+- **HLS.js config**: enabled `enableWorker: true`, `liveDurationInfinity: true`, increased retry limits (`fragLoadingMaxRetry: 10`, `manifestLoadingMaxRetry: 10`), added `backBufferLength: 120`
+- **Error threshold for stall alarm**: raised from 3 to 10 consecutive non-fatal errors before triggering "Video Stalled"
+- **`bufferStalledError` excluded** from consecutive error counter (self-healing, too frequent)
+- **Quality switching**: removed forced `hls.currentLevel = 0` on `MANIFEST_PARSED` (caused excessive re-buffering); quality now only switches when toggling Solo mode
+- **Audio `.play()` errors**: wrapped in silent `.catch()` to suppress `AbortError` console spam
+- **NGINX proxy**: each dashboard instance runs OpenResty with dynamic `UPSTREAM_HOST` injection to route traffic to the correct Next.js container
+
+---
+
 ## [1.6.0] - 2025-12-31
 
 ### Fixed
