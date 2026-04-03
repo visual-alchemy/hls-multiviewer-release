@@ -285,30 +285,68 @@ export function VideoPlayer({
       return
     }
 
-    const hls = hlsRef.current
     const video = videoRef.current
-    if (!hls || !video) {
-      return
-    }
+    if (!video) return
 
     const retryInterval = setInterval(() => {
-      console.log("Attempting to recover stream, attempt:", recoverAttemptsRef.current + 1)
+      // If permanently stopped (403) during a recovery attempt, bail out
+      if (isPermanentlyStoppedRef.current) {
+        clearInterval(retryInterval)
+        retryIntervalRef.current = null
+        return
+      }
+
       recoverAttemptsRef.current += 1
-
-      // Reset consecutive error count on recovery attempt
       consecutiveErrorsRef.current = 0
+      console.log(`Recovering stream ${title} — full HLS reinit, attempt ${recoverAttemptsRef.current}`)
 
-      // Full reload of manifest every attempt to discover new segments
-      console.log("Reloading HLS manifest...")
-      hls.stopLoad()
-      hls.loadSource(url)
-      hls.startLoad()
+      // Fully destroy the old (potentially corrupted) HLS instance
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
 
-      // Also try recoverMediaError in case of codec issues
-      hls.recoverMediaError()
+      // Clear the video src so the element resets to a clean state
+      video.removeAttribute("src")
+      video.load()
 
-      // Always try to play after recovery attempt
-      video.play().catch(err => console.log("Play after recovery failed:", err))
+      // Create a brand-new HLS instance — mirrors what a browser refresh does
+      const newHls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 8,
+        liveMaxLatencyDurationCount: 25,
+        liveDurationInfinity: true,
+        backBufferLength: 120,
+        maxMaxBufferLength: 90,
+        maxBufferSize: 160 * 1024 * 1024,
+        fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetry: 10,
+        manifestLoadingRetryDelay: 1000,
+        manifestLoadingMaxRetry: 10,
+        xhrSetup: function (xhr) {
+          xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
+        },
+      })
+
+      hlsRef.current = newHls
+      newHls.loadSource(url)
+      newHls.attachMedia(video)
+
+      // Re-attach the 403 guard on the new instance
+      newHls.on(Hls.Events.ERROR, function (_, data) {
+        const httpCode = (data.response as any)?.code
+        if (httpCode === 403) {
+          console.warn(`Stream ${title}: received 403 during recovery. Stopping permanently.`)
+          hasFatalErrorRef.current = true
+          isPermanentlyStoppedRef.current = true
+          newHls.stopLoad()
+          clearInterval(retryInterval)
+          retryIntervalRef.current = null
+        }
+      })
+
+      video.play().catch(err => console.log(`Play after reinit failed (${title}):`, err))
     }, 5000)
 
     retryIntervalRef.current = retryInterval
@@ -317,7 +355,7 @@ export function VideoPlayer({
       clearInterval(retryInterval)
       retryIntervalRef.current = null
     }
-  }, [hasFatalError, url])
+  }, [hasFatalError, url, title])
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
