@@ -8,11 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.1.0] - 2026-04-04
+
+### Fixed
+- **HLS recovery now fully recreates the instance**: instead of reusing a potentially corrupted HLS.js instance, the recovery loop now destroys it completely and creates a brand-new one — mirroring what a browser refresh does. Fixes streams that were stuck in "Video Stalled" and never self-healed without a manual page refresh.
+- **`handleStall` log spam**: added an early guard (`if (hasFatalErrorRef.current) return`) that prevents the `stalled`/`waiting` video events from logging "Video stalled for 15+ seconds" repeatedly after the alert has already fired.
+- **403 mid-recovery handled correctly**: the new HLS instance created during recovery now has its own 403 guard — if a stream token expires mid-recovery attempt, it stops permanently and clears the retry interval immediately.
+- **Recovery loop escapes stopped state**: added an `isPermanentlyStoppedRef` check inside the retry `setInterval` so if the 403 flag is set asynchronously during a recovery cycle, the next tick bails out without attempting another reinit.
+
+### Removed
+- **"Stream Offline" alarm**: consolidated into "Video Stalled". HTTP 403 (expired token / stream taken offline) now shows "Video Stalled" instead of a separate alarm label — simplifies the alarm system without losing detection capability.
+
+---
+
 ## [2.0.0] - 2026-04-01
 
 ### Added
 - **Multi-instance Docker deployment**: isolated instances (`primary-1` port 3111, `event-1` port 3115, `konten-1` port 3116) each with dedicated Docker volumes
-- **Stream Offline alarm**: detects HTTP 403 responses (expired token / stream taken down) and shows "Stream Offline" label — stops all retries immediately instead of hammering the CDN
+- **403 token expiry detection**: HTTP 403 responses stop all retries immediately — no retry spam on a dead/expired token. Shows "Video Stalled" to indicate the stream is down
 - **Import confirmation dialog**: before replacing streams, shows an `AlertDialog` with the count of current vs imported streams. User must confirm before any data is overwritten
 - **Toast notifications**: success and error feedback after import operations using shadcn/ui Toaster
 - **Docker log rotation**: `json-file` driver with `max-size: 10m` and `max-file: 3` per container to prevent unbounded log growth

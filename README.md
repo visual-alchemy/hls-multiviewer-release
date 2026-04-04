@@ -27,16 +27,15 @@ A production-grade multiviewer application for monitoring multiple HLS (HTTP Liv
 - Silence detection runs on a `setInterval` (100ms polling) — works correctly even when the browser tab is in the background
 
 ### Alarm System
-Three distinct alarm states with visual overlay + audible alert:
+Two distinct alarm states with visual overlay + audible alert:
 
 | Alarm | Trigger |
 |---|---|
-| **Stream Offline** | Server returns HTTP 403 (token expired / stream taken offline) |
-| **Video Stalled** | Video freezes for 15+ seconds, or 10+ consecutive network errors |
+| **Video Stalled** | Video freezes for 15+ seconds, 10+ consecutive network errors, or HTTP 403 (expired token / stream taken offline) |
 | **No Sound** | Audio level below threshold for 10+ continuous seconds |
 
 - Alarm sound can be muted per-stream via the bell icon
-- Recovery loop runs every 5 seconds when "Video Stalled" — stops immediately when the stream resumes
+- Recovery loop runs every 5 seconds when "Video Stalled" — on each attempt, the HLS.js instance is **fully destroyed and recreated** (same as a browser refresh) so corrupted state doesn't block self-healing
 - 403 errors stop all retries immediately (no retry spam on a dead token)
 
 ---
@@ -114,9 +113,13 @@ docker compose up -d
 # Start specific instance only
 docker compose up -d app-primary-1 proxy-primary-1
 
-# Rebuild without cache
+# Clean rebuild (required after code changes)
+docker compose down
 docker compose build --no-cache
 docker compose up -d
+
+# Quick rebuild (same as above but without stopping first)
+docker compose up -d --build
 ```
 
 Each instance's stream configuration is stored in its respective `./data_<name>/streams.json` file and persists across container restarts.
