@@ -170,13 +170,13 @@ export function VideoPlayer({
                 }, 10000)
               }
             } else {
-              // Check for 403: permanent token expiry / stream taken offline
-              // No point retrying — stop immediately and show "Video Stalled"
+              // Check for 403: token expiry / stream taken offline
+              // Stop loading immediately to avoid hammering the CDN
+              // DO NOT set isPermanentlyStoppedRef here — let the recovery loop handle retries
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
-                console.warn(`Stream ${title}: received 403, token expired or stream offline. Stopping retries.`)
+                console.warn(`Stream ${title}: received 403, token expired or stream offline. Stopping load — recovery loop will retry.`)
                 hasFatalErrorRef.current = true // prevent stall timer/handleStall firing on top
-                isPermanentlyStoppedRef.current = true // block retry useEffect
                 setHasFatalError(true)
                 hls.stopLoad()
                 return
@@ -288,8 +288,12 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
+    // Tracks 403s specifically during recovery attempts
+    // After 5 consecutive 403s we assume the URL is permanently dead and stop
+    let consecutive403sInRecovery = 0
+
     const retryInterval = setInterval(() => {
-      // If permanently stopped (403) during a recovery attempt, bail out
+      // If permanently stopped (hit max 403 retries), bail out
       if (isPermanentlyStoppedRef.current) {
         clearInterval(retryInterval)
         retryIntervalRef.current = null
@@ -333,16 +337,30 @@ export function VideoPlayer({
       newHls.loadSource(url)
       newHls.attachMedia(video)
 
-      // Re-attach the 403 guard on the new instance
+      // 403 during recovery: don't permanently stop on first hit.
+      // Transient 403s (CDN hiccup, brief token window issue) can recover.
+      // Only give up permanently after 5 consecutive 403s.
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
-          console.warn(`Stream ${title}: received 403 during recovery. Stopping permanently.`)
-          hasFatalErrorRef.current = true
-          isPermanentlyStoppedRef.current = true
-          newHls.stopLoad()
-          clearInterval(retryInterval)
-          retryIntervalRef.current = null
+          consecutive403sInRecovery += 1
+          console.warn(`Stream ${title}: 403 during recovery (${consecutive403sInRecovery}/5). ${
+            consecutive403sInRecovery >= 5 ? 'Giving up permanently.' : 'Will retry next cycle.'
+          }`)
+          // Destroy this failed instance — next interval tick will try again with a fresh one
+          if (hlsRef.current === newHls) {
+            newHls.stopLoad()
+            newHls.destroy()
+            hlsRef.current = null
+          }
+          if (consecutive403sInRecovery >= 5) {
+            isPermanentlyStoppedRef.current = true
+            clearInterval(retryInterval)
+            retryIntervalRef.current = null
+          }
+        } else {
+          // Non-403 error — reset the 403 streak counter
+          consecutive403sInRecovery = 0
         }
       })
 
