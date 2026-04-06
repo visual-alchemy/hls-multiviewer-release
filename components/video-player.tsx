@@ -20,6 +20,7 @@ interface VideoPlayerProps {
     id: number
   }
   startDelayMs?: number
+  onFatalError?: () => void
 }
 
 export function VideoPlayer({
@@ -33,6 +34,7 @@ export function VideoPlayer({
   isSoloed = false,
   playbackCommand,
   startDelayMs = 0,
+  onFatalError,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -357,6 +359,7 @@ export function VideoPlayer({
             isPermanentlyStoppedRef.current = true
             clearInterval(retryInterval)
             retryIntervalRef.current = null
+            if (onFatalError) onFatalError()
           }
         } else {
           // Non-403 error — reset the 403 streak counter

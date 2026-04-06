@@ -53,6 +53,12 @@ export default function MultiViewer() {
   // State for import confirmation dialog
   const [pendingImport, setPendingImport] = useState<Stream[] | null>(null)
   const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false)
+
+  // State for soft reload mechanism
+  const [softReloadKey, setSoftReloadKey] = useState(0)
+  const [isSoftReloading, setIsSoftReloading] = useState(false)
+  const [fatalErrorCount, setFatalErrorCount] = useState(0)
+
   const { toast } = useToast()
 
   // Load streams from the API when component mounts
@@ -72,6 +78,23 @@ export default function MultiViewer() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
     }
   }, [])
+
+  // Effect to trigger soft reload when fatal errors occur
+  useEffect(() => {
+    if (fatalErrorCount > 0 && !isSoftReloading) {
+      console.log(`Detected stream failures (${fatalErrorCount}). Triggering soft reload sweep in 10s...`)
+      setIsSoftReloading(true)
+
+      const timer = setTimeout(() => {
+        console.log("Executing soft reload: rebuilding streams to bypass CDN cache.")
+        setSoftReloadKey((prev) => prev + 1)
+        setFatalErrorCount(0)
+        setIsSoftReloading(false)
+      }, 10000)
+
+      return () => clearTimeout(timer)
+    }
+  }, [fatalErrorCount, isSoftReloading])
 
   // Load grid configuration from localStorage
   useEffect(() => {
@@ -286,8 +309,13 @@ export default function MultiViewer() {
     setSoloStreamId((prevId) => (prevId === id ? null : id))
   }
 
+  // Handle fatal error prop from individual VideoPlayers
+  const handleFatalError = () => {
+    setFatalErrorCount((prev) => prev + 1)
+  }
+
   return (
-    <div className={`min-h-screen bg-[#1a1b26] flex flex-col ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
+    <div className={`h-screen bg-[#1a1b26] flex flex-col ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
       <div className={`flex items-center shrink-0 mb-4 ${isFullscreen || soloStreamId ? "hidden" : ""}`}>
         <div className="flex items-center">
@@ -346,8 +374,8 @@ export default function MultiViewer() {
       <div
         className={
           soloStreamId
-            ? "flex-grow w-full h-full relative" // Solo mode full container
-            : `grid gap-2 w-full flex-grow ${isFullscreen ? "h-screen auto-rows-fr overflow-auto p-2" : "gap-4"}`
+            ? "flex-grow min-h-0 w-full h-full relative" // min-h-0 critical for flex
+            : `grid w-full flex-grow min-h-0 gap-2 overflow-hidden ${isFullscreen ? "h-screen p-2" : ""}`
         }
         style={
           soloStreamId
@@ -368,17 +396,17 @@ export default function MultiViewer() {
 
           return (
             <div
-              key={stream ? stream.id : index}
+              key={`${stream ? stream.id : index}-${softReloadKey}`}
               className={
                 soloStreamId
                   ? "w-full h-full absolute inset-0" // Solo mode container overrides
-                  : `${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`
+                  : "w-full h-full min-h-0" // Removing aspect-video to fit perfectly into any screen
               }
             >
               {stream ? (
                 <VideoPlayer
                   title={stream.title}
-                  url={stream.url}
+                  url={softReloadKey > 0 ? `${stream.url}${stream.url.includes("?") ? "&" : "?"}softReload=${softReloadKey}` : stream.url}
                   onEdit={() => handleEditStream(stream.id)}
                   onDelete={() => handleDeleteStream(stream.id)}
                   onSolo={() => toggleSoloStream(stream.id)}
@@ -387,6 +415,7 @@ export default function MultiViewer() {
                   isSoloed={soloStreamId === stream.id}
                   playbackCommand={playbackCommand}
                   startDelayMs={staggerSeed + index * 300}
+                  onFatalError={handleFatalError}
                 />
               ) : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
