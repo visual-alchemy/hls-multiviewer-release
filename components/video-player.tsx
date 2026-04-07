@@ -303,6 +303,18 @@ export function VideoPlayer({
       }
 
       recoverAttemptsRef.current += 1
+
+      // If we attempt recovery 6 times (30 seconds) without a successful play event, 
+      // trigger the dashboard-wide soft-reload to wipe the browser cache and fix the black screen.
+      if (recoverAttemptsRef.current >= 6) {
+        console.warn(`Stream ${title}: Failed to recover after 30 seconds. Triggering soft reload sweep.`)
+        isPermanentlyStoppedRef.current = true
+        clearInterval(retryInterval)
+        retryIntervalRef.current = null
+        if (onFatalError) onFatalError()
+        return
+      }
+
       consecutiveErrorsRef.current = 0
       console.log(`Recovering stream ${title} — full HLS reinit, attempt ${recoverAttemptsRef.current}`)
 
