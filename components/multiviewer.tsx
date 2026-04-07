@@ -56,8 +56,8 @@ export default function MultiViewer() {
 
   // State for soft reload mechanism
   const [softReloadKey, setSoftReloadKey] = useState(0)
-  const [isSoftReloading, setIsSoftReloading] = useState(false)
   const [fatalErrorCount, setFatalErrorCount] = useState(0)
+  const reloadTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const { toast } = useToast()
 
@@ -80,21 +80,19 @@ export default function MultiViewer() {
   }, [])
 
   // Effect to trigger soft reload when fatal errors occur
+  // Uses a ref so the timer is never interrupted by other state changes
   useEffect(() => {
-    if (fatalErrorCount > 0 && !isSoftReloading) {
+    if (fatalErrorCount > 0 && !reloadTimerRef.current) {
       console.log(`Detected stream failures (${fatalErrorCount}). Triggering soft reload sweep in 10s...`)
-      setIsSoftReloading(true)
-
-      const timer = setTimeout(() => {
+      
+      reloadTimerRef.current = setTimeout(() => {
         console.log("Executing soft reload: rebuilding streams to bypass CDN cache.")
         setSoftReloadKey((prev) => prev + 1)
         setFatalErrorCount(0)
-        setIsSoftReloading(false)
+        reloadTimerRef.current = null
       }, 10000)
-
-      return () => clearTimeout(timer)
     }
-  }, [fatalErrorCount, isSoftReloading])
+  }, [fatalErrorCount])
 
   // Load grid configuration from localStorage
   useEffect(() => {
