@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.1.1] - 2026-04-07
+
+### Fixed
+- **Soft Reload triggered for all stalled streams**: previously, the dashboard-wide soft reload (F5 equivalent mechanism) only triggered if the stream received an explicit HTTP `403 Forbidden` error. It now triggers correctly if *any* error (like `404 Not Found` or `net::ERR_CONTENT_LENGTH_MISMATCH`) fails to self-recover after 30 seconds (6 attempts).
+- **React timer cleanup bug**: fixed a severe bug where the 10-second soft-reload countdown was instantly cancelled the moment it was created. This occurred because triggering the "Reloading sweeps in 10s..." status updated a React state component, forcing a re-render which prematurely triggered the previous `useEffect`'s `clearTimeout` function. The 10-second timer has been moved to an isolated `useRef` to safely detach it from the render lifecycle.
+
+---
+
 ## [2.1.0] - 2026-04-04
 
 ### Fixed

@@ -36,7 +36,8 @@ Two distinct alarm states with visual overlay + audible alert:
 
 - Alarm sound can be muted per-stream via the bell icon
 - Recovery loop runs every 5 seconds when "Video Stalled" — on each attempt, the HLS.js instance is **fully destroyed and recreated** (same as a browser refresh) so corrupted state doesn't block self-healing
-- 403 errors stop all retries immediately (no retry spam on a dead token)
+- Dashboard auto-refresh (Soft Reload): If a stream fails to recover after 6 consecutive attempts (30 seconds), the dashboard will sweep all players to bypass CDN caches and force a seamless browser-level refresh.
+- 403 errors stop all retries immediately and gracefully (no retry spam on a dead token)
 
 ---
 
