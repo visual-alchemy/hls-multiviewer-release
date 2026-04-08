@@ -34,7 +34,7 @@ Two distinct alarm states with visual overlay + audible alert:
 | **Video Stalled** | Video freezes for 15+ seconds, 10+ consecutive network errors, or HTTP 403 (expired token / stream taken offline) |
 | **No Sound** | Audio level below threshold for 10+ continuous seconds |
 
-- Alarm sound can be muted per-stream via the bell icon
+- Alarm sound can be muted per-stream via the bell icon. **Muting a stream also completely disables the dashboard auto-refresh (Soft Reload) trigger for that specific stream,** allowing it to silently recover in the background without periodically reloading the entire dashboard.
 - Recovery loop runs every 5 seconds when "Video Stalled" — on each attempt, the HLS.js instance is **fully destroyed and recreated** (same as a browser refresh) so corrupted state doesn't block self-healing
 - Dashboard auto-refresh (Soft Reload): If a stream fails to recover after 6 consecutive attempts (30 seconds), the dashboard will sweep all players to bypass CDN caches and force a seamless browser-level refresh.
 - 403 errors stop all retries immediately and gracefully (no retry spam on a dead token)
