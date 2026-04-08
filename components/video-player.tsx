@@ -43,6 +43,7 @@ export function VideoPlayer({
   const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
+  const isPausedRef = useRef(false) // mirrors isPaused for the setInterval closure
   const [isAlarmMuted, setIsAlarmMuted] = useState(false)
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
@@ -88,6 +89,7 @@ export function VideoPlayer({
             hasFatalErrorRef.current = false
             setHasStreamError(false)
             setIsPaused(false)
+            isPausedRef.current = false
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
             lastPlayingTimeRef.current = Date.now()
@@ -234,9 +236,11 @@ export function VideoPlayer({
     if (playbackCommand.action === "play") {
       video.play().catch((err) => console.error("Error resuming video:", err))
       setIsPaused(false)
+      isPausedRef.current = false
     } else {
       video.pause()
       setIsPaused(true)
+      isPausedRef.current = true
     }
   }, [playbackCommand])
 
@@ -258,10 +262,14 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
     if (video.paused) {
-      video.play().then(() => setIsPaused(false)).catch((err) => console.error("Error resuming video:", err))
+      video.play().then(() => {
+        setIsPaused(false)
+        isPausedRef.current = false
+      }).catch((err) => console.error("Error resuming video:", err))
     } else {
       video.pause()
       setIsPaused(true)
+      isPausedRef.current = true
     }
   }
 
@@ -295,6 +303,12 @@ export function VideoPlayer({
     let consecutive403sInRecovery = 0
 
     const retryInterval = setInterval(() => {
+      // If the user manually paused the video, suspend the auto-recovery loop.
+      // Paused streams should not attempt reinits or trigger global dashboard refreshes.
+      if (isPausedRef.current) {
+        return
+      }
+
       // If permanently stopped (hit max 403 retries), bail out
       if (isPermanentlyStoppedRef.current) {
         clearInterval(retryInterval)
