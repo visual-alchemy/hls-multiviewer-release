@@ -57,9 +57,7 @@ export default function MultiViewer() {
   // State for soft reload mechanism
   const [softReloadKey, setSoftReloadKey] = useState(0)
   const [fatalErrorCount, setFatalErrorCount] = useState(0)
-  const [tokenExpiredCount, setTokenExpiredCount] = useState(0)
   const reloadTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const tokenRefreshTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const { toast } = useToast()
 
@@ -81,36 +79,23 @@ export default function MultiViewer() {
     }
   }, [])
 
-  // Effect to trigger soft reload when fatal errors occur
-  // Uses a ref so the timer is never interrupted by other state changes
+  // Effect to trigger soft reload when fatal errors occur.
+  // Incrementing softReloadKey forces VideoPlayer to fully unmount + remount,
+  // which resets all stuck internal state (isPermanentlyStoppedRef, hasFatalError, etc.)
+  // This mirrors exactly what a manual browser F5 does — without losing fullscreen.
+  // Uses a ref so the timer is never interrupted by other React state changes.
   useEffect(() => {
     if (fatalErrorCount > 0 && !reloadTimerRef.current) {
-      console.log(`Detected stream_down failures (${fatalErrorCount}). Triggering cache-bust soft reload in 10s...`)
-      
+      console.log(`Detected ${fatalErrorCount} stream failure(s). Triggering soft reload in 5s...`)
+
       reloadTimerRef.current = setTimeout(() => {
-        console.log("Executing soft reload: rebuilding streams to bypass CDN cache.")
+        console.log("Executing soft reload: fully remounting all VideoPlayer instances.")
         setSoftReloadKey((prev) => prev + 1)
         setFatalErrorCount(0)
         reloadTimerRef.current = null
-      }, 10000)
+      }, 5000)
     }
   }, [fatalErrorCount])
-
-  // Effect to re-fetch fresh stream URLs when token_expired is signalled
-  // Debounced: waits 3s to batch multiple simultaneous token_expired signals
-  useEffect(() => {
-    if (tokenExpiredCount > 0 && !tokenRefreshTimerRef.current) {
-      console.log(`Detected token_expired signals (${tokenExpiredCount}). Re-fetching fresh stream URLs in 3s...`)
-
-      tokenRefreshTimerRef.current = setTimeout(async () => {
-        console.log("Re-fetching stream list to get fresh tokens from the API...")
-        await fetchStreams()
-        setTokenExpiredCount(0)
-        tokenRefreshTimerRef.current = null
-        console.log("Stream list refreshed with new tokens.")
-      }, 3000)
-    }
-  }, [tokenExpiredCount])
 
   // Load grid configuration from localStorage
   useEffect(() => {
@@ -325,14 +310,13 @@ export default function MultiViewer() {
     setSoloStreamId((prevId) => (prevId === id ? null : id))
   }
 
-  // Handle fatal error prop from individual VideoPlayers
+  // Handle fatal error prop from individual VideoPlayers.
+  // Both "token_expired" (403, CDN blip) and "stream_down" (persistent network failure)
+  // trigger the same soft reload — incrementing softReloadKey fully remounts all VideoPlayer
+  // components, resetting isPermanentlyStoppedRef and all other stuck state.
   const handleFatalError = (reason: "token_expired" | "stream_down") => {
-    if (reason === "token_expired") {
-      console.log(`Token expired signal received. Queuing URL refresh.`)
-      setTokenExpiredCount((prev) => prev + 1)
-    } else {
-      setFatalErrorCount((prev) => prev + 1)
-    }
+    console.log(`Fatal error signal received: ${reason}. Queuing soft reload.`)
+    setFatalErrorCount((prev) => prev + 1)
   }
 
   return (
