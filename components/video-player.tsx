@@ -20,7 +20,7 @@ interface VideoPlayerProps {
     id: number
   }
   startDelayMs?: number
-  onFatalError?: () => void
+  onFatalError?: (reason: "token_expired" | "stream_down") => void
 }
 
 export function VideoPlayer({
@@ -45,6 +45,7 @@ export function VideoPlayer({
   const [isPaused, setIsPaused] = useState(false)
   const isPausedRef = useRef(false) // mirrors isPaused for the setInterval closure
   const [isAlarmMuted, setIsAlarmMuted] = useState(false)
+  const isAlarmMutedRef = useRef(false) // mirrors isAlarmMuted for the setInterval closure
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
   const isPermanentlyStoppedRef = useRef(false) // set on 403 — prevents retry loop firing
@@ -321,12 +322,17 @@ export function VideoPlayer({
       // If we attempt recovery 6 times (30 seconds) without a successful play event, 
       // trigger the dashboard-wide soft-reload to wipe the browser cache and fix the black screen.
       if (recoverAttemptsRef.current >= 6) {
-        console.warn(`Stream ${title}: Failed to recover after 30 seconds. Triggering soft reload sweep.`)
-        isPermanentlyStoppedRef.current = true
-        clearInterval(retryInterval)
-        retryIntervalRef.current = null
-        if (onFatalError) onFatalError()
-        return
+        if (isAlarmMutedRef.current) {
+          console.warn(`Stream ${title}: Failed to recover after 30 seconds. Skipping soft reload sweep because stream alarm is muted. Resetting attempt counter silently.`)
+          recoverAttemptsRef.current = 0
+        } else {
+          console.warn(`Stream ${title}: Failed to recover after 30 seconds. Triggering soft reload sweep.`)
+          isPermanentlyStoppedRef.current = true
+          clearInterval(retryInterval)
+          retryIntervalRef.current = null
+          if (onFatalError) onFatalError("stream_down")
+          return
+        }
       }
 
       consecutiveErrorsRef.current = 0
@@ -385,7 +391,12 @@ export function VideoPlayer({
             isPermanentlyStoppedRef.current = true
             clearInterval(retryInterval)
             retryIntervalRef.current = null
-            if (onFatalError) onFatalError()
+            if (isAlarmMutedRef.current) {
+              console.warn(`Stream ${title}: 403 permanently stopped, but skipping dashboard reload because alarm is muted.`)
+            } else {
+              console.warn(`Stream ${title}: Persistent 403 after 5 attempts — signalling token_expired to dashboard.`)
+              if (onFatalError) onFatalError("token_expired")
+            }
           }
         } else {
           // Non-403 error — reset the 403 streak counter
@@ -434,7 +445,10 @@ export function VideoPlayer({
                 <Expand className="h-3 w-3" />
               </Button>
             )}
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => setIsAlarmMuted(!isAlarmMuted)}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => {
+              setIsAlarmMuted(!isAlarmMuted)
+              isAlarmMutedRef.current = !isAlarmMuted
+            }}>
               {isAlarmMuted ? <BellOff className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
             </Button>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={handleTogglePlayback}>

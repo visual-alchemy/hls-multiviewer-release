@@ -57,7 +57,9 @@ export default function MultiViewer() {
   // State for soft reload mechanism
   const [softReloadKey, setSoftReloadKey] = useState(0)
   const [fatalErrorCount, setFatalErrorCount] = useState(0)
+  const [tokenExpiredCount, setTokenExpiredCount] = useState(0)
   const reloadTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const tokenRefreshTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const { toast } = useToast()
 
@@ -83,7 +85,7 @@ export default function MultiViewer() {
   // Uses a ref so the timer is never interrupted by other state changes
   useEffect(() => {
     if (fatalErrorCount > 0 && !reloadTimerRef.current) {
-      console.log(`Detected stream failures (${fatalErrorCount}). Triggering soft reload sweep in 10s...`)
+      console.log(`Detected stream_down failures (${fatalErrorCount}). Triggering cache-bust soft reload in 10s...`)
       
       reloadTimerRef.current = setTimeout(() => {
         console.log("Executing soft reload: rebuilding streams to bypass CDN cache.")
@@ -93,6 +95,22 @@ export default function MultiViewer() {
       }, 10000)
     }
   }, [fatalErrorCount])
+
+  // Effect to re-fetch fresh stream URLs when token_expired is signalled
+  // Debounced: waits 3s to batch multiple simultaneous token_expired signals
+  useEffect(() => {
+    if (tokenExpiredCount > 0 && !tokenRefreshTimerRef.current) {
+      console.log(`Detected token_expired signals (${tokenExpiredCount}). Re-fetching fresh stream URLs in 3s...`)
+
+      tokenRefreshTimerRef.current = setTimeout(async () => {
+        console.log("Re-fetching stream list to get fresh tokens from the API...")
+        await fetchStreams()
+        setTokenExpiredCount(0)
+        tokenRefreshTimerRef.current = null
+        console.log("Stream list refreshed with new tokens.")
+      }, 3000)
+    }
+  }, [tokenExpiredCount])
 
   // Load grid configuration from localStorage
   useEffect(() => {
@@ -308,8 +326,13 @@ export default function MultiViewer() {
   }
 
   // Handle fatal error prop from individual VideoPlayers
-  const handleFatalError = () => {
-    setFatalErrorCount((prev) => prev + 1)
+  const handleFatalError = (reason: "token_expired" | "stream_down") => {
+    if (reason === "token_expired") {
+      console.log(`Token expired signal received. Queuing URL refresh.`)
+      setTokenExpiredCount((prev) => prev + 1)
+    } else {
+      setFatalErrorCount((prev) => prev + 1)
+    }
   }
 
   return (
