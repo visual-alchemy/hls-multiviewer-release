@@ -48,9 +48,12 @@ export function VideoPlayer({
   const isAlarmMutedRef = useRef(false) // mirrors isAlarmMuted for the setInterval closure
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
-  const isPermanentlyStoppedRef = useRef(false) // set on 403 — prevents retry loop firing
+  const isPermanentlyStoppedRef = useRef(false) // set when recovery permanently gives up
   const recoverAttemptsRef = useRef(0)
   const consecutiveErrorsRef = useRef(0)
+  // Records the type of error that triggered hasFatalError, so the recovery interval
+  // knows from tick 1 whether to do a 403-path (dashboard reload) or stream-down (silent retry).
+  const fatalErrorTypeRef = useRef<"403" | "stream_down" | null>(null)
   const lastPlayingTimeRef = useRef<number>(Date.now())
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // Video Stalled takes priority over No Sound when stream has errors
@@ -88,11 +91,13 @@ export function VideoPlayer({
           const handlePlaying = () => {
             setHasFatalError(false)
             hasFatalErrorRef.current = false
+            fatalErrorTypeRef.current = null // reset error type on successful recovery
             setHasStreamError(false)
             setIsPaused(false)
             isPausedRef.current = false
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
+            isPermanentlyStoppedRef.current = false // allow future recovery attempts
             lastPlayingTimeRef.current = Date.now()
             // Immediately clear the retry interval so it stops as soon as stream recovers
             if (retryIntervalRef.current) {
@@ -173,13 +178,16 @@ export function VideoPlayer({
                 }, 10000)
               }
             } else {
-              // 403: stop hammering the CDN immediately, enter recovery loop which will retry
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
-                console.warn(`Stream ${title}: received 403. Stopping load — recovery loop will retry and trigger soft reload if persistent.`)
+                // 403: immediate stop + record error type BEFORE setting hasFatalError.
+                // fatalErrorTypeRef being set here (before the state update) ensures the
+                // recovery interval reads "403" from tick 1, not "stream_down".
+                console.warn(`[${title}] 403 received. Recording error type and entering recovery loop.`)
+                fatalErrorTypeRef.current = "403"
                 hasFatalErrorRef.current = true
-                setHasFatalError(true)
                 hls.stopLoad()
+                setHasFatalError(true)
                 return
               }
 
@@ -193,9 +201,10 @@ export function VideoPlayer({
                 setHasStreamError(true)
 
                 if (consecutiveErrorsRef.current >= 10) {
-                  // Circuit breaker: stream is effectively down (404, ERR_INSUFFICIENT_RESOURCES, etc.)
+                  // Circuit breaker: stream is effectively down (404, network error, etc.)
                   // Stop making requests and enter the silent retry loop.
-                  console.log(`[${title}] Circuit breaker: ${consecutiveErrorsRef.current} consecutive errors. Stopping load, entering silent retry.`)
+                  console.log(`[${title}] Circuit breaker: ${consecutiveErrorsRef.current} errors. Entering stream-down retry.`)
+                  fatalErrorTypeRef.current = "stream_down"
                   hls.stopLoad()
                   hasFatalErrorRef.current = true
                   setHasFatalError(true)
@@ -297,13 +306,19 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
-    // Track whether the error was a persistent 403 (needs dashboard reload)
-    // or a stream-down error (needs silent infinite retry only)
-    let is403Recovery = false
+    // Read the error type that was recorded BEFORE hasFatalError was set.
+    // This is the fix for the is403Recovery closure bug: instead of inferring
+    // the error type inside the interval callback (where it was always wrong on
+    // the first tick), we read it directly from a ref that was set at detection time.
+    const recoveryMode = fatalErrorTypeRef.current ?? "stream_down"
+    console.log(`[${title}] Entering recovery loop. Mode: ${recoveryMode}`)
+
+    // Counts consecutive 403s seen on the new HLS instances created during recovery.
+    // Shared across all interval ticks via closure — no closure bug since it's
+    // a simple number, not derived from async callbacks.
     let consecutive403sInRecovery = 0
 
     const retryInterval = setInterval(() => {
-      // If the user manually paused or muted alarm, do not attempt reinit
       if (isPausedRef.current) return
 
       if (isPermanentlyStoppedRef.current) {
@@ -314,16 +329,15 @@ export function VideoPlayer({
 
       recoverAttemptsRef.current += 1
 
-      // --- 403 path: triggers dashboard soft reload after 6 attempts ---
-      // 403 means CDN auth issue (brief window, proxy blip). A dashboard remount
-      // resets all components and is the correct recovery. Retry 6 times first.
-      if (is403Recovery) {
+      if (recoveryMode === "403") {
+        // 403 path: after 6 attempts (30s), trigger dashboard soft reload.
+        // A full dashboard remount resets all components and is the correct recovery.
         if (recoverAttemptsRef.current >= 6) {
           if (isAlarmMutedRef.current) {
-            console.warn(`[${title}] 403: Failed to recover after 30s. Alarm muted — resetting counter silently.`)
+            console.warn(`[${title}] 403: Failed after 30s. Alarm muted — resetting counter silently.`)
             recoverAttemptsRef.current = 0
           } else {
-            console.warn(`[${title}] 403: Failed to recover after 30s. Triggering dashboard soft reload.`)
+            console.warn(`[${title}] 403: Failed after 30s. Triggering dashboard soft reload.`)
             isPermanentlyStoppedRef.current = true
             clearInterval(retryInterval)
             retryIntervalRef.current = null
@@ -331,20 +345,16 @@ export function VideoPlayer({
             return
           }
         }
-
-        consecutiveErrorsRef.current = 0
-        console.log(`[${title}] 403 recovery — full HLS reinit, attempt ${recoverAttemptsRef.current}`)
+        console.log(`[${title}] 403 recovery — reinit attempt ${recoverAttemptsRef.current}/6`)
       } else {
-        // --- Stream-down path: retry silently forever, no dashboard reload ---
-        // 404 / ERR_INSUFFICIENT_RESOURCES / CDN blip — the stream is temporarily offline.
-        // Keep retrying quietly. If it comes back, handlePlaying() clears all error state.
-        // resetAttempts every 6 so the counter doesn't overflow but retries continue
+        // Stream-down path: retry silently forever — no dashboard reload.
+        // Reset counter every 6 so it doesn't overflow, but keep retrying indefinitely.
         if (recoverAttemptsRef.current >= 6) {
-          console.log(`[${title}] Stream-down: still offline after 30s, will keep retrying silently...`)
+          console.log(`[${title}] Stream-down: still offline after 30s, continuing silent retry...`)
           recoverAttemptsRef.current = 0
-          return // skip reinit this cycle, just wait for next tick
+          return
         }
-        console.log(`[${title}] Stream-down — full HLS reinit, attempt ${recoverAttemptsRef.current}`)
+        console.log(`[${title}] Stream-down — reinit attempt ${recoverAttemptsRef.current}`)
       }
 
       consecutiveErrorsRef.current = 0
@@ -379,13 +389,15 @@ export function VideoPlayer({
       newHls.loadSource(url)
       newHls.attachMedia(video)
 
+      // Monitor errors on the new instance during recovery.
+      // For 403s: count them so we can give up after 5 and signal the dashboard.
+      // For other errors: do nothing — the outer interval will retry on next tick.
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
-          is403Recovery = true
           consecutive403sInRecovery += 1
-          console.warn(`[${title}] 403 during recovery (${consecutive403sInRecovery}/5). ${
-            consecutive403sInRecovery >= 5 ? 'Giving up permanently.' : 'Will retry next cycle.'
+          console.warn(`[${title}] 403 on reinit instance (${consecutive403sInRecovery}/5). ${
+            consecutive403sInRecovery >= 5 ? 'Giving up.' : 'Next tick will retry.'
           }`)
           if (hlsRef.current === newHls) {
             newHls.stopLoad()
@@ -397,16 +409,13 @@ export function VideoPlayer({
             clearInterval(retryInterval)
             retryIntervalRef.current = null
             if (isAlarmMutedRef.current) {
-              console.warn(`[${title}] 403 permanently stopped, alarm muted — skipping dashboard reload.`)
+              console.warn(`[${title}] 403 permanently stopped, alarm muted — no dashboard reload.`)
             } else {
               if (onFatalError) onFatalError("token_expired")
             }
           }
-        } else {
-          // Non-403 during recovery: mark as stream-down, reset 403 streak
-          is403Recovery = false
-          consecutive403sInRecovery = 0
         }
+        // Non-403: no action needed here, outer interval will retry on next tick
       })
 
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
