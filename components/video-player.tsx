@@ -303,6 +303,15 @@ export function VideoPlayer({
       return
     }
 
+    // Guard: if a recovery interval is already running, do NOT spawn a second one.
+    // hasFatalError can be set to true multiple times (stall handler re-fires while already
+    // recovering), which would cause this useEffect to re-run and create duplicate intervals
+    // that destroy each other's HLS instances.
+    if (retryIntervalRef.current !== null) {
+      console.log(`[${title}] Recovery interval already running — skipping duplicate.`)
+      return
+    }
+
     const video = videoRef.current
     if (!video) return
 
@@ -390,14 +399,15 @@ export function VideoPlayer({
       newHls.attachMedia(video)
 
       // Monitor errors on the new instance during recovery.
-      // For 403s: count them so we can give up after 5 and signal the dashboard.
-      // For other errors: do nothing — the outer interval will retry on next tick.
+      // 403: if we're in stream_down mode and a reinit gets a 403, it means the stream
+      // came back online but its segments are forbidden — escalate to dashboard reload.
+      // If already in 403 mode: count toward the give-up threshold.
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
           consecutive403sInRecovery += 1
           console.warn(`[${title}] 403 on reinit instance (${consecutive403sInRecovery}/5). ${
-            consecutive403sInRecovery >= 5 ? 'Giving up.' : 'Next tick will retry.'
+            consecutive403sInRecovery >= 5 ? 'Triggering dashboard reload.' : 'Next tick will retry.'
           }`)
           if (hlsRef.current === newHls) {
             newHls.stopLoad()
@@ -405,17 +415,21 @@ export function VideoPlayer({
             hlsRef.current = null
           }
           if (consecutive403sInRecovery >= 5) {
+            // After 5 consecutive 403s on reinit instances, the stream URL is truly broken.
+            // Trigger dashboard soft reload regardless of recovery mode — this is the
+            // correct fix for streams that come back online but have stale/forbidden tokens.
             isPermanentlyStoppedRef.current = true
             clearInterval(retryInterval)
             retryIntervalRef.current = null
             if (isAlarmMutedRef.current) {
               console.warn(`[${title}] 403 permanently stopped, alarm muted — no dashboard reload.`)
             } else {
+              console.warn(`[${title}] Escalating to dashboard soft reload after persistent 403s during recovery.`)
               if (onFatalError) onFatalError("token_expired")
             }
           }
         }
-        // Non-403: no action needed here, outer interval will retry on next tick
+        // Non-403: outer interval will retry on next tick
       })
 
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
