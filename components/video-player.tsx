@@ -440,6 +440,16 @@ export function VideoPlayer({
     return () => {
       clearInterval(retryInterval)
       retryIntervalRef.current = null
+      // Destroy the HLS instance that was created during the last interval tick.
+      // Without this, the orphan HLS instance survives the component unmount (e.g.,
+      // during soft reload), keeps firing error callbacks on a detached video element,
+      // and blocks the fresh component from properly initializing.
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
+      // Reset error type so the fresh component doesn't inherit a stale classification
+      fatalErrorTypeRef.current = null
     }
   }, [hasFatalError, url, title])
 
