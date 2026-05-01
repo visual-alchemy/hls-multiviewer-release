@@ -180,14 +180,18 @@ export function VideoPlayer({
             } else {
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
-                // 403: immediate stop + record error type BEFORE setting hasFatalError.
-                // fatalErrorTypeRef being set here (before the state update) ensures the
-                // recovery interval reads "403" from tick 1, not "stream_down".
-                console.warn(`[${title}] 403 received. Recording error type and entering recovery loop.`)
+                // 403: Akamai HDNTL segment-level token has expired.
+                // Retrying with the same URL is pointless — the expired token is baked
+                // into the playlist response cached by the browser. Only a hard page
+                // reload can clear the cache and fetch fresh manifests with new tokens.
+                // Signal onFatalError immediately to trigger the page reload.
+                console.warn(`[${title}] 403 received. Signaling immediate page reload.`)
                 fatalErrorTypeRef.current = "403"
                 hasFatalErrorRef.current = true
+                isPermanentlyStoppedRef.current = true
                 hls.stopLoad()
                 setHasFatalError(true)
+                if (onFatalError) onFatalError("token_expired")
                 return
               }
 
@@ -304,9 +308,6 @@ export function VideoPlayer({
     }
 
     // Guard: if a recovery interval is already running, do NOT spawn a second one.
-    // hasFatalError can be set to true multiple times (stall handler re-fires while already
-    // recovering), which would cause this useEffect to re-run and create duplicate intervals
-    // that destroy each other's HLS instances.
     if (retryIntervalRef.current !== null) {
       console.log(`[${title}] Recovery interval already running — skipping duplicate.`)
       return
@@ -315,17 +316,17 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
-    // Read the error type that was recorded BEFORE hasFatalError was set.
-    // This is the fix for the is403Recovery closure bug: instead of inferring
-    // the error type inside the interval callback (where it was always wrong on
-    // the first tick), we read it directly from a ref that was set at detection time.
     const recoveryMode = fatalErrorTypeRef.current ?? "stream_down"
-    console.log(`[${title}] Entering recovery loop. Mode: ${recoveryMode}`)
 
-    // Counts consecutive 403s seen on the new HLS instances created during recovery.
-    // Shared across all interval ticks via closure — no closure bug since it's
-    // a simple number, not derived from async callbacks.
-    let consecutive403sInRecovery = 0
+    // 403 errors now trigger an immediate page reload from the initial error handler.
+    // If we somehow enter the recovery useEffect with mode=403, just bail — the page
+    // reload is already queued and will fire in 5 seconds.
+    if (recoveryMode === "403") {
+      console.log(`[${title}] 403 recovery — page reload already queued, skipping recovery loop.`)
+      return
+    }
+
+    console.log(`[${title}] Entering recovery loop. Mode: stream_down`)
 
     const retryInterval = setInterval(() => {
       if (isPausedRef.current) return
@@ -338,33 +339,14 @@ export function VideoPlayer({
 
       recoverAttemptsRef.current += 1
 
-      if (recoveryMode === "403") {
-        // 403 path: after 6 attempts (30s), trigger dashboard soft reload.
-        // A full dashboard remount resets all components and is the correct recovery.
-        if (recoverAttemptsRef.current >= 6) {
-          if (isAlarmMutedRef.current) {
-            console.warn(`[${title}] 403: Failed after 30s. Alarm muted — resetting counter silently.`)
-            recoverAttemptsRef.current = 0
-          } else {
-            console.warn(`[${title}] 403: Failed after 30s. Triggering dashboard soft reload.`)
-            isPermanentlyStoppedRef.current = true
-            clearInterval(retryInterval)
-            retryIntervalRef.current = null
-            if (onFatalError) onFatalError("token_expired")
-            return
-          }
-        }
-        console.log(`[${title}] 403 recovery — reinit attempt ${recoverAttemptsRef.current}/6`)
-      } else {
-        // Stream-down path: retry silently forever — no dashboard reload.
-        // Reset counter every 6 so it doesn't overflow, but keep retrying indefinitely.
-        if (recoverAttemptsRef.current >= 6) {
-          console.log(`[${title}] Stream-down: still offline after 30s, continuing silent retry...`)
-          recoverAttemptsRef.current = 0
-          return
-        }
-        console.log(`[${title}] Stream-down — reinit attempt ${recoverAttemptsRef.current}`)
+      // Stream-down path: retry silently forever — no page reload.
+      // Reset counter every 6 so it doesn't overflow, but keep retrying indefinitely.
+      if (recoverAttemptsRef.current >= 6) {
+        console.log(`[${title}] Stream-down: still offline after 30s, continuing silent retry...`)
+        recoverAttemptsRef.current = 0
+        return
       }
+      console.log(`[${title}] Stream-down — reinit attempt ${recoverAttemptsRef.current}`)
 
       consecutiveErrorsRef.current = 0
 
@@ -398,38 +380,24 @@ export function VideoPlayer({
       newHls.loadSource(url)
       newHls.attachMedia(video)
 
-      // Monitor errors on the new instance during recovery.
-      // 403: if we're in stream_down mode and a reinit gets a 403, it means the stream
-      // came back online but its segments are forbidden — escalate to dashboard reload.
-      // If already in 403 mode: count toward the give-up threshold.
+      // Monitor errors on the reinit instance during stream-down recovery.
+      // If a 403 appears, the stream came back online but has stale tokens →
+      // escalate to page reload immediately.
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
-          consecutive403sInRecovery += 1
-          console.warn(`[${title}] 403 on reinit instance (${consecutive403sInRecovery}/5). ${
-            consecutive403sInRecovery >= 5 ? 'Triggering dashboard reload.' : 'Next tick will retry.'
-          }`)
+          console.warn(`[${title}] 403 on reinit instance during stream-down recovery. Triggering page reload.`)
           if (hlsRef.current === newHls) {
             newHls.stopLoad()
             newHls.destroy()
             hlsRef.current = null
           }
-          if (consecutive403sInRecovery >= 5) {
-            // After 5 consecutive 403s on reinit instances, the stream URL is truly broken.
-            // Trigger dashboard soft reload regardless of recovery mode — this is the
-            // correct fix for streams that come back online but have stale/forbidden tokens.
-            isPermanentlyStoppedRef.current = true
-            clearInterval(retryInterval)
-            retryIntervalRef.current = null
-            if (isAlarmMutedRef.current) {
-              console.warn(`[${title}] 403 permanently stopped, alarm muted — no dashboard reload.`)
-            } else {
-              console.warn(`[${title}] Escalating to dashboard soft reload after persistent 403s during recovery.`)
-              if (onFatalError) onFatalError("token_expired")
-            }
-          }
+          isPermanentlyStoppedRef.current = true
+          clearInterval(retryInterval)
+          retryIntervalRef.current = null
+          if (onFatalError) onFatalError("token_expired")
         }
-        // Non-403: outer interval will retry on next tick
+        // Non-403 errors: outer interval will create a new instance on next tick
       })
 
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
@@ -440,15 +408,10 @@ export function VideoPlayer({
     return () => {
       clearInterval(retryInterval)
       retryIntervalRef.current = null
-      // Destroy the HLS instance that was created during the last interval tick.
-      // Without this, the orphan HLS instance survives the component unmount (e.g.,
-      // during soft reload), keeps firing error callbacks on a detached video element,
-      // and blocks the fresh component from properly initializing.
       if (hlsRef.current) {
         hlsRef.current.destroy()
         hlsRef.current = null
       }
-      // Reset error type so the fresh component doesn't inherit a stale classification
       fatalErrorTypeRef.current = null
     }
   }, [hasFatalError, url, title])

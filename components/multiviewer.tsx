@@ -79,20 +79,21 @@ export default function MultiViewer() {
     }
   }, [])
 
-  // Effect to trigger soft reload when fatal errors occur.
-  // Incrementing softReloadKey forces VideoPlayer to fully unmount + remount,
-  // which resets all stuck internal state (isPermanentlyStoppedRef, hasFatalError, etc.)
-  // This mirrors exactly what a manual browser F5 does — without losing fullscreen.
-  // Uses a ref so the timer is never interrupted by other React state changes.
+  // Effect to trigger a HARD page reload when fatal 403 errors occur.
+  // A React-level soft remount does NOT work for 403 recovery because:
+  //   1. The HLS master URL itself is still valid (hdnts token = 1 year).
+  //   2. But Akamai embeds short-lived HDNTL tokens inside the playlist responses.
+  //   3. A soft remount reuses the same URL → browser HTTP cache serves the stale playlist
+  //      with expired HDNTL tokens → 403 on segments again → infinite loop.
+  // A full window.location.reload() clears the browser HTTP cache, forcing fresh
+  // manifest fetches from the CDN with new HDNTL tokens — exactly like a manual F5.
   useEffect(() => {
     if (fatalErrorCount > 0 && !reloadTimerRef.current) {
-      console.log(`Detected ${fatalErrorCount} stream failure(s). Triggering soft reload in 5s...`)
+      console.log(`Detected ${fatalErrorCount} stream failure(s). Triggering HARD page reload in 5s...`)
 
       reloadTimerRef.current = setTimeout(() => {
-        console.log("Executing soft reload: fully remounting all VideoPlayer instances.")
-        setSoftReloadKey((prev) => prev + 1)
-        setFatalErrorCount(0)
-        reloadTimerRef.current = null
+        console.log("Executing hard page reload to clear stale Akamai HDNTL tokens.")
+        window.location.reload()
       }, 5000)
     }
   }, [fatalErrorCount])
