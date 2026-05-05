@@ -55,6 +55,7 @@ export function VideoPlayer({
   // knows from tick 1 whether to do a 403-path (dashboard reload) or stream-down (silent retry).
   const fatalErrorTypeRef = useRef<"403" | "stream_down" | null>(null)
   const lastPlayingTimeRef = useRef<number>(Date.now())
+  const lastCurrentTimeRef = useRef<number>(0) // tracks video.currentTime to detect genuine freeze
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // Video Stalled takes priority over No Sound when stream has errors
   const showAlert = hasFatalError || (isSilent && !hasStreamError)
@@ -99,6 +100,7 @@ export function VideoPlayer({
             consecutiveErrorsRef.current = 0
             isPermanentlyStoppedRef.current = false // allow future recovery attempts
             lastPlayingTimeRef.current = Date.now()
+            lastCurrentTimeRef.current = video.currentTime // snapshot for stall detection
             // Immediately clear the retry interval so it stops as soon as stream recovers
             if (retryIntervalRef.current) {
               clearInterval(retryIntervalRef.current)
@@ -111,13 +113,27 @@ export function VideoPlayer({
           }
 
           // Track video stall/waiting events
-          // Uses a ref instead of state to avoid stale closure issues
+          // OLD BUG: relied on lastPlayingTimeRef ("playing" event fires once on start,
+          // NOT continuously during playback). After 15+ seconds of normal playback,
+          // any browser "stalled"/"waiting" event (common during live HLS buffer refills)
+          // would trigger a false "Video Stalled" alert.
+          // FIX: compare video.currentTime snapshots. If currentTime hasn't advanced
+          // in 15+ seconds, playback is genuinely frozen.
           const handleStall = () => {
-            // Guard: if alarm already active, do nothing (prevents log spam from repeated stalled/waiting events)
+            // Guard: if alarm already active, do nothing
             if (hasFatalErrorRef.current) return
-            const timeSinceLastPlaying = Date.now() - lastPlayingTimeRef.current
-            if (timeSinceLastPlaying > 15000) {
-              console.log("Video stalled for 15+ seconds, triggering alert")
+            const currentTime = video.currentTime
+            const timeSinceUpdate = Date.now() - lastPlayingTimeRef.current
+            // If currentTime is advancing, playback is fine — update the snapshot
+            if (currentTime !== lastCurrentTimeRef.current) {
+              lastCurrentTimeRef.current = currentTime
+              lastPlayingTimeRef.current = Date.now()
+              return
+            }
+            // currentTime hasn't changed — check for how long
+            if (timeSinceUpdate > 15000) {
+              console.log(`[${title}] Video genuinely frozen for 15+ seconds (currentTime stuck at ${currentTime}s). Triggering alert.`)
+              fatalErrorTypeRef.current = "stream_down"
               hasFatalErrorRef.current = true
               setHasFatalError(true)
             }
@@ -173,6 +189,9 @@ export function VideoPlayer({
               }
               if (!fatalTimerRef.current) {
                 fatalTimerRef.current = setTimeout(() => {
+                  // Explicitly set error type so recovery loop knows the mode
+                  fatalErrorTypeRef.current = "stream_down"
+                  hasFatalErrorRef.current = true
                   setHasFatalError(true)
                   fatalTimerRef.current = null
                 }, 10000)
