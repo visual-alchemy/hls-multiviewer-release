@@ -83,6 +83,10 @@ export function VideoPlayer({
             manifestLoadingMaxRetry: 10,
             xhrSetup: function (xhr, url) {
               xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
+              // Force browser to bypass HTTP cache. Without this, the browser caches
+              // corrupt level playlists from the CDN (levelParsingError) and serves
+              // the stale response on every recovery reinit, preventing recovery.
+              xhr.setRequestHeader("Cache-Control", "no-cache, no-store")
             },
           })
           hlsRef.current = hls
@@ -395,6 +399,7 @@ export function VideoPlayer({
         manifestLoadingMaxRetry: 10,
         xhrSetup: function (xhr) {
           xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
+          xhr.setRequestHeader("Cache-Control", "no-cache, no-store")
         },
       })
 
