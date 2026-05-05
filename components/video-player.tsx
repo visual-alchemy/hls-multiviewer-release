@@ -81,6 +81,8 @@ export function VideoPlayer({
             fragLoadingMaxRetry: 10,
             manifestLoadingRetryDelay: 1000,
             manifestLoadingMaxRetry: 10,
+            startLevel: 0, // Force start at lowest resolution (360p or less)
+            capLevelToPlayerSize: true, // Never load higher resolution than the box size
             xhrSetup: function (xhr, url) {
               xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
               // Force browser to bypass HTTP cache. Without this, the browser caches
