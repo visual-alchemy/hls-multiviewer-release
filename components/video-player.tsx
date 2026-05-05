@@ -173,23 +173,31 @@ export function VideoPlayer({
 
           hls.on(Hls.Events.ERROR, function (event, data) {
             if (data.fatal) {
-              console.error(`Fatal HLS Error (${title}):`, data.details)
-              switch (data.type) {
-                case Hls.ErrorTypes.NETWORK_ERROR:
-                  console.log("Network error, attempting startLoad recovery...")
-                  hls.startLoad()
-                  break
-                case Hls.ErrorTypes.MEDIA_ERROR:
-                  console.log("Media error, attempting recoverMediaError...")
-                  hls.recoverMediaError()
-                  break
-                default:
-                  console.log("Unknown fatal error type:", data.type)
-                  break
+              console.error(`[${title}] Fatal HLS Error:`, data.details, `(type: ${data.type})`)
+              // levelParsingError: the CDN returned HTTP 200 but the body is not valid M3U8
+              // (e.g. nginx Lua filter stripped all variants, or CDN served an HTML error page).
+              // Calling startLoad() is WRONG here — it reloads the same corrupt content in a
+              // tight loop. Instead, stop the instance and let the recovery loop handle it.
+              if (data.details === 'levelParsingError') {
+                console.warn(`[${title}] levelParsingError — stopping HLS, will retry via recovery loop.`)
+                hls.stopLoad()
+              } else {
+                switch (data.type) {
+                  case Hls.ErrorTypes.NETWORK_ERROR:
+                    console.log(`[${title}] Network error, attempting startLoad recovery...`)
+                    hls.startLoad()
+                    break
+                  case Hls.ErrorTypes.MEDIA_ERROR:
+                    console.log(`[${title}] Media error, attempting recoverMediaError...`)
+                    hls.recoverMediaError()
+                    break
+                  default:
+                    console.log(`[${title}] Unknown fatal error type:`, data.type)
+                    break
+                }
               }
               if (!fatalTimerRef.current) {
                 fatalTimerRef.current = setTimeout(() => {
-                  // Explicitly set error type so recovery loop knows the mode
                   fatalErrorTypeRef.current = "stream_down"
                   hasFatalErrorRef.current = true
                   setHasFatalError(true)
@@ -199,11 +207,6 @@ export function VideoPlayer({
             } else {
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
-                // 403: Akamai HDNTL segment-level token has expired.
-                // Retrying with the same URL is pointless — the expired token is baked
-                // into the playlist response cached by the browser. Only a hard page
-                // reload can clear the cache and fetch fresh manifests with new tokens.
-                // Signal onFatalError immediately to trigger the page reload.
                 console.warn(`[${title}] 403 received. Signaling immediate page reload.`)
                 fatalErrorTypeRef.current = "403"
                 hasFatalErrorRef.current = true
@@ -400,8 +403,6 @@ export function VideoPlayer({
       newHls.attachMedia(video)
 
       // Monitor errors on the reinit instance during stream-down recovery.
-      // If a 403 appears, the stream came back online but has stale tokens →
-      // escalate to page reload immediately.
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
@@ -416,8 +417,37 @@ export function VideoPlayer({
           retryIntervalRef.current = null
           if (onFatalError) onFatalError("token_expired")
         }
-        // Non-403 errors: outer interval will create a new instance on next tick
+        if (data.fatal && data.details === 'levelParsingError') {
+          // levelParsingError on reinit: CDN/proxy still returning corrupt content.
+          // Stop this instance immediately — the next interval tick will create a fresh one.
+          console.warn(`[${title}] levelParsingError on reinit — stopping, will retry next tick.`)
+          if (hlsRef.current === newHls) {
+            newHls.stopLoad()
+            newHls.destroy()
+            hlsRef.current = null
+          }
+        }
       })
+
+      // When the reinit instance recovers, clear the fatal error state.
+      // This listener is on the video element which persists across HLS reinits.
+      const onRecovery = () => {
+        if (hasFatalErrorRef.current) {
+          console.log(`[${title}] Stream recovered after reinit — clearing alert.`)
+          hasFatalErrorRef.current = false
+          setHasFatalError(false)
+          fatalErrorTypeRef.current = null
+          recoverAttemptsRef.current = 0
+          consecutiveErrorsRef.current = 0
+          isPermanentlyStoppedRef.current = false
+          lastPlayingTimeRef.current = Date.now()
+          lastCurrentTimeRef.current = video.currentTime
+          clearInterval(retryInterval)
+          retryIntervalRef.current = null
+          video.removeEventListener("playing", onRecovery)
+        }
+      }
+      video.addEventListener("playing", onRecovery)
 
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
     }, 5000)
