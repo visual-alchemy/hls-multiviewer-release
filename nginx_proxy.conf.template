@@ -200,8 +200,28 @@ server {
                     end
                 end
 
-                ngx.arg[1] = table.concat(new_body, "\n") .. "\n"
-                ngx.log(ngx.ERR, "Final body length: ", string.len(ngx.arg[1]))
+                -- Safety check: if the filter produced no stream variants,
+                -- pass through the ORIGINAL body unchanged. An empty M3U8 with only
+                -- #EXTM3U causes HLS.js levelParsingError → black screen → no recovery.
+                -- This happens when DRM streams (CTV 2-6, Bein 1-2) have variant URLs
+                -- that don't match the expected "hls-p"/"hls-b" pattern.
+                local has_stream_inf = false
+                for _, line in ipairs(new_body) do
+                    if string.find(line, "#EXT-X-STREAM-INF", 1, true) then
+                        has_stream_inf = true
+                        break
+                    end
+                end
+
+                if has_stream_inf then
+                    ngx.arg[1] = table.concat(new_body, "\n") .. "\n"
+                    ngx.log(ngx.ERR, "Final body length: ", string.len(ngx.arg[1]))
+                else
+                    -- Fallback: no variants matched the filter — return original body
+                    -- so HLS.js can play the first available variant instead of crashing.
+                    ngx.log(ngx.ERR, "WARNING: No stream variants matched filter! Passing through original body.")
+                    ngx.arg[1] = body
+                end
                 ngx.log(ngx.ERR, "===== DEBUG END =====")
             end
         }
