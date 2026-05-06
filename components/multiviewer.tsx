@@ -414,10 +414,15 @@ export default function MultiViewer() {
                   : "w-full h-full min-h-0" // Removing aspect-video to fit perfectly into any screen
               }
             >
-              {stream ? (
+              {stream ? (() => {
+                const PROXY_BASE_URL = "http://192.168.40.54"
+                const baseUrl = stream.url.startsWith("/") ? `${PROXY_BASE_URL}${stream.url}` : stream.url
+                const finalUrl = softReloadKey > 0 ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}softReload=${softReloadKey}` : baseUrl
+
+                return (
                 <VideoPlayer
                   title={stream.title}
-                  url={softReloadKey > 0 ? `${stream.url}${stream.url.includes("?") ? "&" : "?"}softReload=${softReloadKey}` : stream.url}
+                  url={finalUrl}
                   onEdit={() => handleEditStream(stream.id)}
                   onDelete={() => handleDeleteStream(stream.id)}
                   onSolo={() => toggleSoloStream(stream.id)}
@@ -428,7 +433,8 @@ export default function MultiViewer() {
                   startDelayMs={staggerSeed + index * 300}
                   onFatalError={handleFatalError}
                 />
-              ) : (
+                )
+              })() : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
                   <p className="text-gray-400">No Stream</p>
                 </div>
