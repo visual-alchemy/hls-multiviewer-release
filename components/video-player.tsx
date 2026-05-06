@@ -56,6 +56,7 @@ export function VideoPlayer({
   const fatalErrorTypeRef = useRef<"403" | "stream_down" | null>(null)
   const lastPlayingTimeRef = useRef<number>(Date.now())
   const lastCurrentTimeRef = useRef<number>(0) // tracks video.currentTime to detect genuine freeze
+  const [internalReloadCount, setInternalReloadCount] = useState(0)
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
   // Video Stalled takes priority over No Sound when stream has errors
   const showAlert = hasFatalError || (isSilent && !hasStreamError)
@@ -91,8 +92,13 @@ export function VideoPlayer({
               xhr.setRequestHeader("Cache-Control", "no-cache, no-store")
             },
           })
+          
           hlsRef.current = hls
-          hls.loadSource(url)
+          const sourceUrl = internalReloadCount > 0 
+            ? `${url}${url.includes('?') ? '&' : '?'}panelReload=${internalReloadCount}` 
+            : url
+
+          hls.loadSource(sourceUrl)
           hls.attachMedia(video)
 
           const handlePlaying = () => {
@@ -185,8 +191,9 @@ export function VideoPlayer({
               // Calling startLoad() is WRONG here — it reloads the same corrupt content in a
               // tight loop. Instead, stop the instance and let the recovery loop handle it.
               if (data.details === 'levelParsingError') {
-                console.warn(`[${title}] levelParsingError — stopping HLS, will retry via recovery loop.`)
-                hls.stopLoad()
+                console.warn(`[${title}] levelParsingError - performing internal panel hard-reset...`)
+                setInternalReloadCount(prev => prev + 1)
+                hls.destroy()
               } else {
                 switch (data.type) {
                   case Hls.ErrorTypes.NETWORK_ERROR:

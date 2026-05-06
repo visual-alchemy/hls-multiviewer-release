@@ -88,6 +88,10 @@ export default function MultiViewer() {
   // A full window.location.reload() clears the browser HTTP cache, forcing fresh
   // manifest fetches from the CDN with new HDNTL tokens — exactly like a manual F5.
   useEffect(() => {
+    /* 
+    DISABLED: Relying on per-panel hard reset (internalReloadCount) to recover from 403s
+    instead of refreshing the entire dashboard.
+    
     if (fatalErrorCount > 0 && !reloadTimerRef.current) {
       console.log(`Detected ${fatalErrorCount} stream failure(s). Triggering HARD page reload in 5s...`)
 
@@ -96,6 +100,7 @@ export default function MultiViewer() {
         window.location.reload()
       }, 5000)
     }
+    */
   }, [fatalErrorCount])
 
   // Load grid configuration from localStorage
