@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import Hls from "hls.js"
 import { Edit2, Trash2, Pause, Play, Bell, BellOff, Expand } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -56,20 +56,99 @@ export function VideoPlayer({
   const fatalErrorTypeRef = useRef<"403" | "stream_down" | null>(null)
   const lastPlayingTimeRef = useRef<number>(Date.now())
   const lastCurrentTimeRef = useRef<number>(0) // tracks video.currentTime to detect genuine freeze
+  const activeUrlRef = useRef<string>(url) // stores resolved URL so recovery reinit uses fresh token
   const [internalReloadCount, setInternalReloadCount] = useState(0)
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  // Video Stalled takes priority over No Sound when stream has errors
+  // Video Stalled takes priority over No Sound.
+  // "No Sound" only shows when the video is genuinely moving but audio is silent.
   const showAlert = hasFatalError || (isSilent && !hasStreamError)
   const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
+
+  // Intercepts onSilenceChange from AudioVisualizer.
+  // If silence fires while video is frozen → escalate to "Video Stalled" + recovery.
+  // If silence fires while video is moving → genuine "No Sound", alert only.
+  const handleSilenceChange = useCallback((silent: boolean) => {
+    if (!silent) {
+      setIsSilent(false)
+      return
+    }
+    // Already in fatal error state or intentionally paused — don't override or alert
+    if (hasFatalErrorRef.current || isPausedRef.current) return
+
+    const video = videoRef.current
+    if (!video) {
+      setIsSilent(true)
+      return
+    }
+
+    const currentTime = video.currentTime
+    const isVideoMoving = currentTime !== lastCurrentTimeRef.current
+
+    if (isVideoMoving) {
+      // True "No Sound": video is running but audio is silent — alert only, no recovery
+      console.log(`[${title}] True silence detected (video moving at ${currentTime}s) → No Sound alert`)
+      setIsSilent(true)
+    } else {
+      // Video is frozen: silence is a symptom of a dead stream — escalate to Video Stalled
+      console.log(`[${title}] Silence detected with frozen video (stuck at ${currentTime}s) → escalating to Video Stalled`)
+      fatalErrorTypeRef.current = "stream_down"
+      hasFatalErrorRef.current = true
+      setHasFatalError(true)
+      // isSilent stays false — "Video Stalled" takes over the alert
+    }
+  }, [title])
 
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     const startTimer = setTimeout(() => {
-      if (url.includes(".m3u8")) {
-        if (Hls.isSupported()) {
-          const hls = new Hls({
+      const initStream = async () => {
+        let activeUrl = url;
+        
+        // 1. Dynamic Resolution for Vidio URLs
+        const isVidioProxy = url.includes('vidio-com-tokenized.akamaized.net') || url.includes('etslive');
+        const vidioMatch = url.match(/vidio\.com\/live\/(\d+)/) || (isVidioProxy && url.match(/\/stream\/(\d+)\//));
+        
+        if (vidioMatch) {
+          try {
+            console.log(`[${title}] Resolving Vidio URL for ID ${vidioMatch[1]}...`);
+            const res = await fetch(`/api/resolve?id=${vidioMatch[1]}`);
+            const data = await res.json();
+            
+            if (data.errors) {
+              console.error(`[${title}] Vidio API Error:`, data.errors);
+              // Continue with the original url if the API returns an error, as it might still be valid
+            } else {
+              const jsonStr = JSON.stringify(data);
+              const m3u8Match = jsonStr.match(/"([^"]+\.m3u8[^"]*)"/);
+              if (m3u8Match) {
+                let resolvedUrl = m3u8Match[1];
+                
+                // Dynamically extract the proxy prefix from the original URL
+                // e.g. "http://192.168.40.54:80/primary/etslive..." -> "http://192.168.40.54:80/primary/"
+                // e.g. "/primary/etslive..." -> "/primary/"
+                const proxyPrefixMatch = url.match(/^(https?:\/\/[^\/]+.*?\/|\/.*?\/)(?:etslive|geo-id|vidio-com)/);
+                
+                if (proxyPrefixMatch && resolvedUrl.startsWith('https://')) {
+                  resolvedUrl = resolvedUrl.replace('https://', proxyPrefixMatch[1]);
+                }
+                
+                activeUrl = resolvedUrl;
+                activeUrlRef.current = resolvedUrl; // persist for recovery loop reinits
+                console.log(`[${title}] Successfully resolved to dynamic HLS URL via proxy:`, activeUrl);
+              } else {
+                console.warn(`[${title}] Could not find .m3u8 in API response.`);
+              }
+            }
+          } catch (e) {
+            console.error(`[${title}] Failed to resolve Vidio URL:`, e);
+          }
+        }
+
+        if (activeUrl.includes(".m3u8") || activeUrl.includes("manifest")) {
+          if (Hls.isSupported()) {
+            const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
             liveSyncDurationCount: 8,
@@ -95,8 +174,8 @@ export function VideoPlayer({
           
           hlsRef.current = hls
           const sourceUrl = internalReloadCount > 0 
-            ? `${url}${url.includes('?') ? '&' : '?'}panelReload=${internalReloadCount}` 
-            : url
+            ? `${activeUrl}${activeUrl.includes('?') ? '&' : '?'}panelReload=${internalReloadCount}` 
+            : activeUrl
 
           hls.loadSource(sourceUrl)
           hls.attachMedia(video)
@@ -132,8 +211,8 @@ export function VideoPlayer({
           // FIX: compare video.currentTime snapshots. If currentTime hasn't advanced
           // in 15+ seconds, playback is genuinely frozen.
           const handleStall = () => {
-            // Guard: if alarm already active, do nothing
-            if (hasFatalErrorRef.current) return
+            // Guard: if alarm already active or video intentionally paused, do nothing
+            if (hasFatalErrorRef.current || isPausedRef.current) return
             const currentTime = video.currentTime
             const timeSinceUpdate = Date.now() - lastPlayingTimeRef.current
             // If currentTime is advancing, playback is fine — update the snapshot
@@ -267,8 +346,11 @@ export function VideoPlayer({
           }
         }
       } else {
-        video.src = url
+        video.src = activeUrl
       }
+      
+      }
+      initStream()
     }, startDelayMs)
 
     return () => {
@@ -413,7 +495,8 @@ export function VideoPlayer({
       })
 
       hlsRef.current = newHls
-      newHls.loadSource(url)
+      // Use the resolved URL (activeUrlRef) so reinit doesn't load an expired token URL
+      newHls.loadSource(activeUrlRef.current)
       newHls.attachMedia(video)
 
       // Monitor errors on the reinit instance during stream-down recovery.
@@ -456,6 +539,9 @@ export function VideoPlayer({
           isPermanentlyStoppedRef.current = false
           lastPlayingTimeRef.current = Date.now()
           lastCurrentTimeRef.current = video.currentTime
+          // Reset stale silence state — after recovery the silence detector
+          // will re-evaluate from scratch on the live stream
+          setIsSilent(false)
           clearInterval(retryInterval)
           retryIntervalRef.current = null
           video.removeEventListener("playing", onRecovery)
@@ -530,7 +616,7 @@ export function VideoPlayer({
 
       {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-10 bottom-2 z-10 flex items-center">
-        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} hasStreamError={hasStreamError} />
+        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={handleSilenceChange} hasStreamError={hasStreamError} />
       </div>
     </div>
   )
