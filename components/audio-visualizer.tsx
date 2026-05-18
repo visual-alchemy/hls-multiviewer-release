@@ -203,6 +203,14 @@ export function AudioVisualizer({ videoRef, isMuted, onSilenceChange, hasStreamE
       // (requestAnimationFrame throttles to ~1fps in hidden tabs, setInterval does not)
       silenceIntervalRef.current = setInterval(() => {
         if (!leftAnalyserRef.current || !rightAnalyserRef.current || audioContextRef.current?.state === "closed") return
+        
+        // Prevent false positive "No Sound" alarms when browser autoplay policy suspends the audio context
+        if (audioContextRef.current?.state === "suspended") {
+          silenceStartRef.current = null
+          reportSilenceChange(false)
+          return
+        }
+
         const silenceCheckData = new Uint8Array(bufferLength)
         leftAnalyserRef.current.getByteFrequencyData(silenceCheckData)
         const leftSilenceAvg = silenceCheckData.reduce((s, v) => s + v, 0) / (bufferLength || 1)

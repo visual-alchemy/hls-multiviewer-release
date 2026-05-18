@@ -445,12 +445,14 @@ export function VideoPlayer({
 
     console.log(`[${title}] Entering recovery loop. Mode: stream_down`)
 
-    const retryInterval = setInterval(() => {
+    const attemptRecovery = () => {
       if (isPausedRef.current) return
 
       if (isPermanentlyStoppedRef.current) {
-        clearInterval(retryInterval)
-        retryIntervalRef.current = null
+        if (retryIntervalRef.current) {
+          clearInterval(retryIntervalRef.current)
+          retryIntervalRef.current = null
+        }
         return
       }
 
@@ -510,8 +512,10 @@ export function VideoPlayer({
             hlsRef.current = null
           }
           isPermanentlyStoppedRef.current = true
-          clearInterval(retryInterval)
-          retryIntervalRef.current = null
+          if (retryIntervalRef.current) {
+            clearInterval(retryIntervalRef.current)
+            retryIntervalRef.current = null
+          }
           if (onFatalError) onFatalError("token_expired")
         }
         if (data.fatal && data.details === 'levelParsingError') {
@@ -542,16 +546,23 @@ export function VideoPlayer({
           // Reset stale silence state — after recovery the silence detector
           // will re-evaluate from scratch on the live stream
           setIsSilent(false)
-          clearInterval(retryInterval)
-          retryIntervalRef.current = null
+          if (retryIntervalRef.current) {
+            clearInterval(retryIntervalRef.current)
+            retryIntervalRef.current = null
+          }
           video.removeEventListener("playing", onRecovery)
         }
       }
       video.addEventListener("playing", onRecovery)
 
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
-    }, 5000)
+    }
 
+    // Fire recovery instantly so we don't wait 5s frozen before the first attempt
+    attemptRecovery()
+    
+    // Then poll every 5s if it still hasn't recovered
+    const retryInterval = setInterval(attemptRecovery, 5000)
     retryIntervalRef.current = retryInterval
 
     return () => {
