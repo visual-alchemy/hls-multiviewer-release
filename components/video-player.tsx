@@ -102,7 +102,12 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
+    let isMounted = true
+
+    const delay = internalReloadCount > 0 ? 100 : startDelayMs
     const startTimer = setTimeout(() => {
+      if (!isMounted) return
+      
       const initStream = async () => {
         let activeUrl = url;
         
@@ -299,12 +304,19 @@ export function VideoPlayer({
             } else {
               const httpCode = (data.response as any)?.code
               if (httpCode === 403) {
-                console.warn(`[${title}] 403 received. Signaling immediate page reload.`)
-                fatalErrorTypeRef.current = "403"
-                hasFatalErrorRef.current = true
-                isPermanentlyStoppedRef.current = true
+                console.warn(`[${title}] 403 Token Expired. Performing internal panel hard-reset to fetch new token...`)
+                setInternalReloadCount(prev => prev + 1)
+                
+                // Clear fatal states so the new instance starts clean
+                hasFatalErrorRef.current = false
+                fatalErrorTypeRef.current = null
+                setHasFatalError(false)
+                isPermanentlyStoppedRef.current = false
+                
                 hls.stopLoad()
-                setHasFatalError(true)
+                hls.destroy()
+                hlsRef.current = null
+                
                 if (onFatalError) onFatalError("token_expired")
                 return
               }
@@ -351,12 +363,16 @@ export function VideoPlayer({
       
       }
       initStream()
-    }, startDelayMs)
+    }, delay)
 
     return () => {
       clearTimeout(startTimer)
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
     }
-  }, [url, startDelayMs])
+  }, [url, startDelayMs, internalReloadCount])
 
   useEffect(() => {
     if (!playbackCommand) return
@@ -435,11 +451,8 @@ export function VideoPlayer({
 
     const recoveryMode = fatalErrorTypeRef.current ?? "stream_down"
 
-    // 403 errors now trigger an immediate page reload from the initial error handler.
-    // If we somehow enter the recovery useEffect with mode=403, just bail — the page
-    // reload is already queued and will fire in 5 seconds.
+    // If 403 somehow reaches here, bail — it's handled by internalReloadCount now.
     if (recoveryMode === "403") {
-      console.log(`[${title}] 403 recovery — page reload already queued, skipping recovery loop.`)
       return
     }
 
@@ -530,31 +543,6 @@ export function VideoPlayer({
         }
       })
 
-      // When the reinit instance recovers, clear the fatal error state.
-      // This listener is on the video element which persists across HLS reinits.
-      const onRecovery = () => {
-        if (hasFatalErrorRef.current) {
-          console.log(`[${title}] Stream recovered after reinit — clearing alert.`)
-          hasFatalErrorRef.current = false
-          setHasFatalError(false)
-          fatalErrorTypeRef.current = null
-          recoverAttemptsRef.current = 0
-          consecutiveErrorsRef.current = 0
-          isPermanentlyStoppedRef.current = false
-          lastPlayingTimeRef.current = Date.now()
-          lastCurrentTimeRef.current = video.currentTime
-          // Reset stale silence state — after recovery the silence detector
-          // will re-evaluate from scratch on the live stream
-          setIsSilent(false)
-          if (retryIntervalRef.current) {
-            clearInterval(retryIntervalRef.current)
-            retryIntervalRef.current = null
-          }
-          video.removeEventListener("playing", onRecovery)
-        }
-      }
-      video.addEventListener("playing", onRecovery)
-
       video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
     }
 
@@ -568,10 +556,10 @@ export function VideoPlayer({
     return () => {
       clearInterval(retryInterval)
       retryIntervalRef.current = null
-      if (hlsRef.current) {
-        hlsRef.current.destroy()
-        hlsRef.current = null
-      }
+      // We explicitly DO NOT destroy hlsRef.current here.
+      // If the stream recovers successfully, hasFatalError becomes false, 
+      // which triggers this cleanup. Destroying it here would instantly kill the recovered stream!
+      // Global cleanup is handled by the initStream useEffect.
       fatalErrorTypeRef.current = null
     }
   }, [hasFatalError, url, title])
