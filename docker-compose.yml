@@ -8,10 +8,31 @@ services:
       dockerfile: Dockerfile
     container_name: hls-multiviewer-app-primary-1
     restart: unless-stopped
-    ports:
-      - "3111:3111"
+    expose:
+      - "3111"
     volumes:
       - ./data_primary_1:/app/data
+    networks:
+      - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy-primary-1:
+    image: openresty/openresty:alpine
+    container_name: hls-multiviewer-proxy-primary-1
+    restart: unless-stopped
+    ports:
+      - "3111:80"
+    volumes:
+      - ./nginx_proxy.conf.template:/tmp/default.conf.template:ro
+    environment:
+      - UPSTREAM_HOST=app-primary-1:3111
+    command: /bin/sh -c "cp /tmp/default.conf.template /etc/nginx/conf.d/default.conf && sed -i \"s/NEXTJS_UPSTREAM/$$UPSTREAM_HOST/g\" /etc/nginx/conf.d/default.conf && /usr/local/openresty/bin/openresty -g 'daemon off;'"
+    depends_on:
+      - app-primary-1
     networks:
       - multiviewer
     logging:
@@ -29,10 +50,31 @@ services:
       dockerfile: Dockerfile
     container_name: hls-multiviewer-app-event-1
     restart: unless-stopped
-    ports:
-      - "3115:3111"
+    expose:
+      - "3111"
     volumes:
       - ./data_event_1:/app/data
+    networks:
+      - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy-event-1:
+    image: openresty/openresty:alpine
+    container_name: hls-multiviewer-proxy-event-1
+    restart: unless-stopped
+    ports:
+      - "3115:80"
+    volumes:
+      - ./nginx_proxy.conf.template:/tmp/default.conf.template:ro
+    environment:
+      - UPSTREAM_HOST=app-event-1:3111
+    command: /bin/sh -c "cp /tmp/default.conf.template /etc/nginx/conf.d/default.conf && sed -i \"s/NEXTJS_UPSTREAM/$$UPSTREAM_HOST/g\" /etc/nginx/conf.d/default.conf && /usr/local/openresty/bin/openresty -g 'daemon off;'"
+    depends_on:
+      - app-event-1
     networks:
       - multiviewer
     logging:
@@ -50,10 +92,31 @@ services:
       dockerfile: Dockerfile
     container_name: hls-multiviewer-app-konten-1
     restart: unless-stopped
-    ports:
-      - "3116:3111"
+    expose:
+      - "3111"
     volumes:
       - ./data_konten_1:/app/data
+    networks:
+      - multiviewer
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy-konten-1:
+    image: openresty/openresty:alpine
+    container_name: hls-multiviewer-proxy-konten-1
+    restart: unless-stopped
+    ports:
+      - "3116:80"
+    volumes:
+      - ./nginx_proxy.conf.template:/tmp/default.conf.template:ro
+    environment:
+      - UPSTREAM_HOST=app-konten-1:3111
+    command: /bin/sh -c "cp /tmp/default.conf.template /etc/nginx/conf.d/default.conf && sed -i \"s/NEXTJS_UPSTREAM/$$UPSTREAM_HOST/g\" /etc/nginx/conf.d/default.conf && /usr/local/openresty/bin/openresty -g 'daemon off;'"
+    depends_on:
+      - app-konten-1
     networks:
       - multiviewer
     logging:
