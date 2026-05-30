@@ -406,12 +406,18 @@ export function VideoPlayer({
   const handleTogglePlayback = () => {
     const video = videoRef.current
     if (!video) return
-    if (video.paused) {
-      video.play().then(() => {
-        setIsPaused(false)
-        isPausedRef.current = false
-      }).catch((err) => console.error("Error resuming video:", err))
+    
+    if (isPaused) {
+      // User wants to resume playback
+      setIsPaused(false)
+      isPausedRef.current = false
+      
+      // If the stream is not in a fatal error state, resume normal playback
+      if (!hasFatalErrorRef.current) {
+        video.play().catch((err) => console.error("Error resuming video:", err))
+      }
     } else {
+      // User wants to pause playback
       video.pause()
       setIsPaused(true)
       isPausedRef.current = true
