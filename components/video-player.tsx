@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
 import { findM3u8Urls, describeJsonStructure } from "@/lib/resolve"
 import { useFrameAnalyzer } from "@/hooks/use-frame-analyzer"
+import { streamLog } from "@/lib/logger"
+import { useAlarm } from "@/hooks/use-alarm"
 
 interface VideoPlayerProps {
   url: string
@@ -51,8 +53,6 @@ export function VideoPlayer({
   const isBlackRef = useRef(false)
   const [isPaused, setIsPaused] = useState(false)
   const isPausedRef = useRef(false) // mirrors isPaused for the setInterval closure
-  const [isAlarmMuted, setIsAlarmMuted] = useState(false)
-  const isAlarmMutedRef = useRef(false) // mirrors isAlarmMuted for the setInterval closure
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
   const isPermanentlyStoppedRef = useRef(false) // set when recovery permanently gives up
@@ -92,12 +92,14 @@ export function VideoPlayer({
 
     if (isVideoMoving) {
       // True "No Sound": video is running but audio is silent — alert only, no recovery
-      console.log(`[${title}] True silence detected (video moving at ${currentTime}s) → No Sound alert`)
-      setIsSilent(true)
+            console.log(`[${title}] True silence detected (video moving at ${currentTime}s) → No Sound alert`)
+              streamLog(title, "silent", "true_silence", "log", "True silence — video moving, no audio", { currentTime })
+              setIsSilent(true)
     } else {
       // Video is frozen: silence is a symptom of a dead stream — escalate to Video Stalled
-      console.log(`[${title}] Silence detected with frozen video (stuck at ${currentTime}s) → escalating to Video Stalled`)
-      fatalErrorTypeRef.current = "stream_down"
+          console.log(`[${title}] Silence detected with frozen video (stuck at ${currentTime}s) → escalating to Video Stalled`)
+              streamLog(title, "stalled", "silence_frozen", "warn", "Silence + frozen — escalating to Video Stalled", { currentTime })
+              fatalErrorTypeRef.current = "stream_down"
       hasFatalErrorRef.current = true
       setHasFatalError(true)
       // isSilent stays false — "Video Stalled" takes over the alert
@@ -147,9 +149,11 @@ export function VideoPlayer({
 
                 activeUrl = resolvedUrl;
                 activeUrlRef.current = resolvedUrl; // persist for recovery loop reinits
+                streamLog(title, "resolving", "url_resolve_ok", "log", `Resolved to dynamic HLS URL (${urls.length} found)`, { url: resolvedUrl });
                 console.log(`[${title}] Successfully resolved to dynamic HLS URL (${urls.length} found):`, activeUrl);
               } else {
                 // Log API response structure to help debug format changes
+                streamLog(title, "resolving", "url_resolve_fail", "warn", "Could not find .m3u8 in API response");
                 console.warn(`[${title}] Could not find .m3u8 in API response. Response structure:`, describeJsonStructure(data));
               }
             }
@@ -206,6 +210,7 @@ export function VideoPlayer({
             isPermanentlyStoppedRef.current = false // allow future recovery attempts
             lastPlayingTimeRef.current = Date.now()
             lastCurrentTimeRef.current = video.currentTime // snapshot for stall detection
+            streamLog(title, "playing", "play_recovered", "log", "Stream recovered — playing")
             // Immediately clear the retry interval so it stops as soon as stream recovers
             if (retryIntervalRef.current) {
               clearInterval(retryIntervalRef.current)
@@ -237,6 +242,7 @@ export function VideoPlayer({
             }
             // currentTime hasn't changed — check for how long
             if (timeSinceUpdate > 15000) {
+              streamLog(title, "stalled", "timecode_stall", "warn", `Frozen for 15+ seconds (currentTime stuck at ${currentTime}s)`, { currentTime, timeSinceUpdate })
               console.log(`[${title}] Video genuinely frozen for 15+ seconds (currentTime stuck at ${currentTime}s). Triggering alert.`)
               fatalErrorTypeRef.current = "stream_down"
               hasFatalErrorRef.current = true
@@ -283,8 +289,9 @@ export function VideoPlayer({
               // (e.g. nginx Lua filter stripped all variants, or CDN served an HTML error page).
               // Calling startLoad() is WRONG here — it reloads the same corrupt content in a
               // tight loop. Instead, stop the instance and let the recovery loop handle it.
-              if (data.details === 'levelParsingError') {
-                console.warn(`[${title}] levelParsingError - performing internal panel hard-reset...`)
+      if (data.details === 'levelParsingError') {
+        streamLog(title, "stalled", "level_parse", "warn", "levelParsingError — hard panel reset")
+        console.warn(`[${title}] levelParsingError - performing internal panel hard-reset...`)
                 setInternalReloadCount(prev => prev + 1)
                 hls.destroy()
               } else {
@@ -304,6 +311,7 @@ export function VideoPlayer({
               }
               if (!fatalTimerRef.current) {
                 fatalTimerRef.current = setTimeout(() => {
+                  streamLog(title, "stalled", "fatal_error", "error", "Fatal HLS error after 10s timer", { details: data.details, type: data.type })
                   fatalErrorTypeRef.current = "stream_down"
                   hasFatalErrorRef.current = true
                   setHasFatalError(true)
@@ -317,6 +325,7 @@ export function VideoPlayer({
                 onStreamStatus({ type: `http_${httpCode}`, title })
               }
               if (httpCode === 403) {
+                streamLog(title, "stalled", "http_403", "warn", "Token expired — hard panel reset", { httpCode })
                 console.warn(`[${title}] 403 Token Expired. Performing internal panel hard-reset to fetch new token...`)
                 setInternalReloadCount(prev => prev + 1)
                 
@@ -345,11 +354,13 @@ export function VideoPlayer({
                 // Report network error to parent for cross-stream correlation
                 if (onStreamStatus && !httpCode) {
                   onStreamStatus({ type: "network", title })
+                  streamLog(title, "stalled", "network_error", "warn", `Non-fatal network error #${consecutiveErrorsRef.current}`, { details: data.details })
                 }
 
                 if (consecutiveErrorsRef.current >= 10) {
                   // Circuit breaker: stream is effectively down (404, network error, etc.)
                   // Stop making requests and enter the silent retry loop.
+                  streamLog(title, "stalled", "circuit_breaker", "warn", `${consecutiveErrorsRef.current} errors — entering stream-down retry`)
                   console.log(`[${title}] Circuit breaker: ${consecutiveErrorsRef.current} errors. Entering stream-down retry.`)
                   fatalErrorTypeRef.current = "stream_down"
                   hls.stopLoad()
@@ -406,6 +417,9 @@ export function VideoPlayer({
     }
   }, [playbackCommand])
 
+  // Alarm audio management (3.1 — extracted into useAlarm hook)
+  const { isMuted: isAlarmMuted, isMutedRef: isAlarmMutedRef, toggleMute: toggleAlarmMute } = useAlarm(showAlert)
+
   // Dynamically switch quality when solo mode changes
   useEffect(() => {
     const hls = hlsRef.current
@@ -440,23 +454,6 @@ export function VideoPlayer({
       isPausedRef.current = true
     }
   }
-
-  useEffect(() => {
-    let audio: HTMLAudioElement | null = null
-    if (showAlert && !isAlarmMuted) {
-      audio = new Audio("/alert.mp3")
-      audio.loop = true
-      audio.play().catch(e => {
-          // Silent catch for play interruptions (AbortError)
-      })
-    }
-    return () => {
-      if (audio) {
-        audio.pause()
-        audio.currentTime = 0
-      }
-    }
-  }, [showAlert, isAlarmMuted])
 
   useEffect(() => {
     if (!hasFatalError || isPermanentlyStoppedRef.current) {
@@ -501,6 +498,7 @@ export function VideoPlayer({
         recoverAttemptsRef.current = 0
         return
       }
+      streamLog(title, "recovering", "recover_attempt", "log", `Reinit attempt ${recoverAttemptsRef.current}`)
       console.log(`[${title}] Stream-down — reinit attempt ${recoverAttemptsRef.current}`)
 
       consecutiveErrorsRef.current = 0
@@ -541,6 +539,7 @@ export function VideoPlayer({
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
+          streamLog(title, "stalled", "http_403", "warn", "403 on recovery instance — hard panel reset")
           console.warn(`[${title}] 403 on reinit instance during stream-down recovery. Performing internal panel hard-reset to fetch fresh token.`)
           if (hlsRef.current === newHls) {
             newHls.stopLoad()
@@ -606,17 +605,20 @@ export function VideoPlayer({
     {
       onFreeze: () => {
         if (hasFatalErrorRef.current || isPausedRef.current) return
+        streamLog(title, "stalled", "visual_freeze", "warn", "Visual freeze detected — frames identical while timecode advances")
         console.log(`[${title}] Visual freeze detected — frames identical while timecode advances. Triggering alert.`)
         fatalErrorTypeRef.current = "stream_down"
         hasFatalErrorRef.current = true
         setHasFatalError(true)
       },
       onBlack: () => {
+        streamLog(title, "black", "black_detect", "warn", "Video Black — luminance below threshold 10s+")
         console.log(`[${title}] Video Black detected — luminance below threshold for 10s+.`)
         isBlackRef.current = true
         setIsBlack(true)
       },
       onBlackCleared: () => {
+        streamLog(title, "playing", "black_clear", "log", "Video Black cleared — luminance restored")
         console.log(`[${title}] Video Black cleared — luminance restored.`)
         isBlackRef.current = false
         setIsBlack(false)
@@ -654,10 +656,7 @@ export function VideoPlayer({
                 <Expand className="h-3 w-3" />
               </Button>
             )}
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => {
-              setIsAlarmMuted(!isAlarmMuted)
-              isAlarmMutedRef.current = !isAlarmMuted
-            }}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={toggleAlarmMute}>
               {isAlarmMuted ? <BellOff className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
             </Button>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={handleTogglePlayback}>

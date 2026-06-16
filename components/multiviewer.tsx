@@ -21,12 +21,16 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { Toaster } from "@/components/ui/toaster"
+import { streamLog } from "@/lib/logger"
 
 // Define the structure of a stream object
 interface Stream {
   id: string
   title: string
   url: string
+  resolvedUrl?: string
+  resolvedAt?: number
+  cdnHost?: string
 }
 
 export default function MultiViewer() {
@@ -359,6 +363,7 @@ export default function MultiViewer() {
             type === "http_403" ? "CDN tokens expiring (403)" :
             `${type} on ${count}/${activeStreams} streams`
           setStreamCorrelationBanner(label)
+          streamLog("correlation", "stalled", "correlation_banner", "warn", label, { activeStreams, affectedStreams: count, errorType: type })
           return
         }
       }
