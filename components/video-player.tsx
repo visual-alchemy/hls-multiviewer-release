@@ -524,18 +524,24 @@ export function VideoPlayer({
       newHls.on(Hls.Events.ERROR, function (_, data) {
         const httpCode = (data.response as any)?.code
         if (httpCode === 403) {
-          console.warn(`[${title}] 403 on reinit instance during stream-down recovery. Triggering page reload.`)
+          console.warn(`[${title}] 403 on reinit instance during stream-down recovery. Performing internal panel hard-reset to fetch fresh token.`)
           if (hlsRef.current === newHls) {
             newHls.stopLoad()
             newHls.destroy()
             hlsRef.current = null
           }
-          isPermanentlyStoppedRef.current = true
           if (retryIntervalRef.current) {
             clearInterval(retryIntervalRef.current)
             retryIntervalRef.current = null
           }
-          if (onFatalError) onFatalError("token_expired")
+          // Reset fatal state so recovery loop doesn't re-spawn,
+          // then bump internalReloadCount to fully remount the panel
+          // with a fresh URL resolve and cache-busted proxy URL.
+          isPermanentlyStoppedRef.current = false
+          hasFatalErrorRef.current = false
+          fatalErrorTypeRef.current = null
+          setHasFatalError(false)
+          setInternalReloadCount(prev => prev + 1)
         }
         if (data.fatal && data.details === 'levelParsingError') {
           // levelParsingError on reinit: CDN/proxy still returning corrupt content.
