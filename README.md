@@ -26,18 +26,50 @@ A production-grade multiviewer application for monitoring multiple HLS (HTTP Liv
 - Reads actual decoded PCM audio from the HLS stream (not simulated)
 - Silence detection runs on a `setInterval` (100ms polling) — works correctly even when the browser tab is in the background
 
+### Visual Stream Health
+- **Canvas-based frame analysis**: captures video frames at 64×36 resolution every 2 seconds
+- **Freeze detection**: compares consecutive frames — detects visual freezes that timecode-based stall detection misses (decoder stalls, corrupted segments)
+- **Black frame detection**: computes average luminance per frame — detects broadcast blackouts and source feed failures while the stream is technically still playing
+
 ### Alarm System
-Two distinct alarm states with visual overlay + audible alert:
 
-| Alarm | Trigger |
+Three distinct alert states with visual overlay + audible alarm:
+
+#### Alert Triggers
+
+| Alert | Detection | Condition | Triggers recovery? |
+|---|---|---|---|
+| **Video Stalled** | Timecode stall | `video.currentTime` hasn't advanced in 15+ seconds | Yes |
+| **Video Stalled** | Silence + frozen | Audio silent AND `currentTime` stuck — escalates from No Sound | Yes |
+| **Video Stalled** | Fatal HLS error | `levelParsingError`, media decode failure, or any fatal error → 10s timer | Yes |
+| **Video Stalled** | Circuit breaker | 10+ consecutive non-fatal errors (502, network, buffer-seek-holes) | Yes |
+| **Video Stalled** | Canvas freeze | 3+ identical frames while timecode advances (canvas capture at 64×36, every 2s) | Yes |
+| **Video Black** | Canvas luminance | Average frame luminance < threshold (2%) for 10+ continuous seconds | No |
+| **No Sound** | Audio RMS | Audio level below RMS threshold for 10+ seconds while video is actively playing | No |
+
+#### Per-Panel Hard Reset Triggers
+
+When the entire player remounts with a fresh URL resolve and cache-busted proxy URL:
+
+| Trigger | Condition |
 |---|---|
-| **Video Stalled** | Video freezes for 15+ seconds, 10+ consecutive network errors, or HTTP 403 (expired token / stream taken offline) |
-| **No Sound** | Audio level below threshold for 10+ continuous seconds |
+| HTTP 403 | Token expired on the main HLS instance |
+| HTTP 403 | Token expired on the recovery loop instance |
+| `levelParsingError` | CDN returned corrupt content (HTML error page, truncated M3U8) |
 
-- Alarm sound can be muted per-stream via the bell icon. **Muting a stream also completely disables the dashboard auto-refresh (Soft Reload) trigger for that specific stream,** allowing it to silently recover in the background without periodically reloading the entire dashboard.
-- Recovery loop runs every 5 seconds when "Video Stalled" — on each attempt, the HLS.js instance is **fully destroyed and recreated** (same as a browser refresh) so corrupted state doesn't block self-healing
-- Dashboard auto-refresh (Soft Reload): If a stream fails to recover after 6 consecutive attempts (30 seconds), the dashboard will sweep all players to bypass CDN caches and force a seamless browser-level refresh.
-- 403 errors stop all retries immediately and gracefully (no retry spam on a dead token)
+#### Alert Priority
+
+```
+Video Stalled (highest) → Video Black → No Sound (lowest)
+```
+
+#### Recovery Behavior
+
+- **Recovery loop** runs every 5 seconds when "Video Stalled" — on each attempt, HLS.js is **fully destroyed and recreated** (same as browser refresh)
+- **Per-panel hard-reset**: HTTP 403 and level parsing errors trigger immediate `internalReloadCount` increment — the panel remounts with fresh URL resolve + `?panelReload=N` cache busting
+- **Cross-stream error correlation**: when >50% of streams share the same HTTP error (e.g. 502) within 30s, a yellow banner appears (e.g. "Proxy unreachable (502)"). Recovery loops still run independently — the banner suppresses noise, not recovery
+- 403 errors trigger immediate hard-reset — no retry spam on an expired token
+- Alarm sound can be muted per-stream via the bell icon
 
 ---
 

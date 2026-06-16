@@ -31,6 +31,16 @@ export async function GET(request: Request) {
   try {
     const res = await fetch(url, { headers });
     const data = await res.json();
+
+    if (!res.ok) {
+      console.error(`[resolve] Vidio API returned ${res.status} for stream ${id}:`, JSON.stringify(data).slice(0, 500));
+      return NextResponse.json({ errors: [{ code: res.status, detail: `Upstream returned ${res.status}` }] }, { status: 502 });
+    }
+
+    // Diagnostic: log response shape to help debug .m3u8 extraction failures
+    const topKeys = typeof data === "object" && data !== null ? Object.keys(data as Record<string, unknown>) : [];
+    console.log(`[resolve] Stream ${id}: HTTP ${res.status}, top-level keys: ${topKeys.join(", ") || "none"}`);
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error resolving Vidio stream:", error);

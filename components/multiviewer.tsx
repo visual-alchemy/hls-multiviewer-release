@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import Image from "next/image"
 import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
@@ -58,6 +58,10 @@ export default function MultiViewer() {
   const [softReloadKey, setSoftReloadKey] = useState(0)
   const [fatalErrorCount, setFatalErrorCount] = useState(0)
   const reloadTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Cross-stream error correlation (Tier 1.5)
+  const [streamCorrelationBanner, setStreamCorrelationBanner] = useState<string | null>(null)
+  const streamErrorsRef = useRef<Map<string, { type: string; time: number }>>(new Map())
 
   const { toast } = useToast()
 
@@ -325,6 +329,45 @@ export default function MultiViewer() {
     setFatalErrorCount((prev) => prev + 1)
   }
 
+  // Cross-stream error correlation handler (Tier 1.5)
+  const handleStreamStatus = useCallback((status: { type: string; title: string }) => {
+    streamErrorsRef.current.set(status.title, { type: status.type, time: Date.now() })
+  }, [])
+
+  // Periodic check for cross-stream error patterns
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now()
+      const errors = streamErrorsRef.current
+      const activeStreams = streams.length
+      if (activeStreams === 0) {
+        setStreamCorrelationBanner(null)
+        return
+      }
+
+      const typeCounts: Record<string, number> = {}
+      for (const [, entry] of errors) {
+        if (now - entry.time < 30000) {
+          typeCounts[entry.type] = (typeCounts[entry.type] || 0) + 1
+        }
+      }
+
+      for (const [type, count] of Object.entries(typeCounts)) {
+        if (count > activeStreams * 0.5) {
+          const label =
+            type === "http_502" ? "Proxy unreachable (502)" :
+            type === "http_403" ? "CDN tokens expiring (403)" :
+            `${type} on ${count}/${activeStreams} streams`
+          setStreamCorrelationBanner(label)
+          return
+        }
+      }
+      setStreamCorrelationBanner(null)
+    }, 10000)
+
+    return () => clearInterval(interval)
+  }, [streams.length])
+
   return (
     <div className={`h-screen bg-[#1a1b26] flex flex-col ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
@@ -381,6 +424,16 @@ export default function MultiViewer() {
         </div>
       </div>
 
+      {/* Cross-stream error correlation banner (Tier 1.5) */}
+      {streamCorrelationBanner && !soloStreamId && (
+        <div className="bg-yellow-600/80 text-white text-sm px-4 py-2 rounded-t-lg flex items-center justify-between shrink-0 mb-2">
+          <span>⚠ {streamCorrelationBanner}</span>
+          <Button variant="ghost" size="sm" className="h-6 text-white hover:bg-yellow-700 ml-4" onClick={() => setStreamCorrelationBanner(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Grid of video players */}
       <div
         className={
@@ -432,6 +485,7 @@ export default function MultiViewer() {
                   playbackCommand={playbackCommand}
                   startDelayMs={staggerSeed + index * 300}
                   onFatalError={handleFatalError}
+                  onStreamStatus={handleStreamStatus}
                 />
                 )
               })() : (

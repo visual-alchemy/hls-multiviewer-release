@@ -5,6 +5,8 @@ import Hls from "hls.js"
 import { Edit2, Trash2, Pause, Play, Bell, BellOff, Expand } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
+import { findM3u8Urls, describeJsonStructure } from "@/lib/resolve"
+import { useFrameAnalyzer } from "@/hooks/use-frame-analyzer"
 
 interface VideoPlayerProps {
   url: string
@@ -21,6 +23,8 @@ interface VideoPlayerProps {
   }
   startDelayMs?: number
   onFatalError?: (reason: "token_expired" | "stream_down") => void
+  /** Reports per-stream error status to parent for cross-stream correlation (Tier 1.5) */
+  onStreamStatus?: (status: { type: string; title: string }) => void
 }
 
 export function VideoPlayer({
@@ -35,6 +39,7 @@ export function VideoPlayer({
   playbackCommand,
   startDelayMs = 0,
   onFatalError,
+  onStreamStatus,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -42,6 +47,8 @@ export function VideoPlayer({
   const hasFatalErrorRef = useRef(false) // mirrors hasFatalError for use in stale closures
   const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
+  const [isBlack, setIsBlack] = useState(false)
+  const isBlackRef = useRef(false)
   const [isPaused, setIsPaused] = useState(false)
   const isPausedRef = useRef(false) // mirrors isPaused for the setInterval closure
   const [isAlarmMuted, setIsAlarmMuted] = useState(false)
@@ -59,10 +66,9 @@ export function VideoPlayer({
   const activeUrlRef = useRef<string>(url) // stores resolved URL so recovery reinit uses fresh token
   const [internalReloadCount, setInternalReloadCount] = useState(0)
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  // Video Stalled takes priority over No Sound.
-  // "No Sound" only shows when the video is genuinely moving but audio is silent.
-  const showAlert = hasFatalError || (isSilent && !hasStreamError)
-  const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
+  // "Video Stalled" takes priority over "Video Black" over "No Sound".
+  const showAlert = hasFatalError || (isBlack && !hasStreamError) || (isSilent && !hasStreamError)
+  const alertMessage = hasFatalError ? "Video Stalled" : (isBlack && !hasStreamError) ? "Video Black" : (isSilent && !hasStreamError) ? "No Sound" : null
 
   // Intercepts onSilenceChange from AudioVisualizer.
   // If silence fires while video is frozen → escalate to "Video Stalled" + recovery.
@@ -125,25 +131,26 @@ export function VideoPlayer({
               console.error(`[${title}] Vidio API Error:`, data.errors);
               // Continue with the original url if the API returns an error, as it might still be valid
             } else {
-              const jsonStr = JSON.stringify(data);
-              const m3u8Match = jsonStr.match(/"([^"]+\.m3u8[^"]*)"/);
-              if (m3u8Match) {
-                let resolvedUrl = m3u8Match[1];
-                
+              // Recursively search the JSON response for .m3u8 URLs
+              const urls = findM3u8Urls(data);
+              if (urls.length > 0) {
+                let resolvedUrl = urls[0]; // longest URL (master playlist)
+
                 // Dynamically extract the proxy prefix from the original URL
                 // e.g. "http://192.168.40.54:80/primary/etslive..." -> "http://192.168.40.54:80/primary/"
                 // e.g. "/primary/etslive..." -> "/primary/"
                 const proxyPrefixMatch = url.match(/^(https?:\/\/[^\/]+.*?\/|\/.*?\/)(?:etslive|geo-id|vidio-com)/);
-                
+
                 if (proxyPrefixMatch && resolvedUrl.startsWith('https://')) {
                   resolvedUrl = resolvedUrl.replace('https://', proxyPrefixMatch[1]);
                 }
-                
+
                 activeUrl = resolvedUrl;
                 activeUrlRef.current = resolvedUrl; // persist for recovery loop reinits
-                console.log(`[${title}] Successfully resolved to dynamic HLS URL via proxy:`, activeUrl);
+                console.log(`[${title}] Successfully resolved to dynamic HLS URL (${urls.length} found):`, activeUrl);
               } else {
-                console.warn(`[${title}] Could not find .m3u8 in API response.`);
+                // Log API response structure to help debug format changes
+                console.warn(`[${title}] Could not find .m3u8 in API response. Response structure:`, describeJsonStructure(data));
               }
             }
           } catch (e) {
@@ -192,6 +199,8 @@ export function VideoPlayer({
             setHasStreamError(false)
             setIsPaused(false)
             isPausedRef.current = false
+            setIsBlack(false)
+            isBlackRef.current = false
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
             isPermanentlyStoppedRef.current = false // allow future recovery attempts
@@ -303,6 +312,10 @@ export function VideoPlayer({
               }
             } else {
               const httpCode = (data.response as any)?.code
+              // Report per-stream status for cross-stream correlation (Tier 1.5)
+              if (onStreamStatus && httpCode) {
+                onStreamStatus({ type: `http_${httpCode}`, title })
+              }
               if (httpCode === 403) {
                 console.warn(`[${title}] 403 Token Expired. Performing internal panel hard-reset to fetch new token...`)
                 setInternalReloadCount(prev => prev + 1)
@@ -329,6 +342,10 @@ export function VideoPlayer({
                   (data.type === Hls.ErrorTypes.NETWORK_ERROR || data.details === 'bufferSeekOverHole')) {
                 consecutiveErrorsRef.current += 1
                 setHasStreamError(true)
+                // Report network error to parent for cross-stream correlation
+                if (onStreamStatus && !httpCode) {
+                  onStreamStatus({ type: "network", title })
+                }
 
                 if (consecutiveErrorsRef.current >= 10) {
                   // Circuit breaker: stream is effectively down (404, network error, etc.)
@@ -576,12 +593,43 @@ export function VideoPlayer({
     }
   }, [hasFatalError, url, title])
 
+  // Visual freeze + black frame detection (Tier 1.3 / 1.4)
+  useFrameAnalyzer(
+    videoRef,
+    {
+      enabled: !hasFatalError && !hasStreamError && !isPaused,
+      intervalMs: 2000,
+      freezeThreshold: 3,
+      blackThreshold: 0.02,
+      blackDurationMs: 10000,
+    },
+    {
+      onFreeze: () => {
+        if (hasFatalErrorRef.current || isPausedRef.current) return
+        console.log(`[${title}] Visual freeze detected — frames identical while timecode advances. Triggering alert.`)
+        fatalErrorTypeRef.current = "stream_down"
+        hasFatalErrorRef.current = true
+        setHasFatalError(true)
+      },
+      onBlack: () => {
+        console.log(`[${title}] Video Black detected — luminance below threshold for 10s+.`)
+        isBlackRef.current = true
+        setIsBlack(true)
+      },
+      onBlackCleared: () => {
+        console.log(`[${title}] Video Black cleared — luminance restored.`)
+        isBlackRef.current = false
+        setIsBlack(false)
+      },
+    },
+  )
+
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
       {/* Video element */}
       <div className="h-full w-full">
         <div className="relative h-full w-full">
-          <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
+          <video ref={videoRef} className="w-full h-full object-contain" crossOrigin="anonymous" autoPlay />
           {alertMessage && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
               <span className="text-white text-lg font-semibold drop-shadow">{alertMessage}</span>

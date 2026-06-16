@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Per-panel 403 recovery**: when a stream token expires during the recovery loop, the panel now performs an internal hard-reset (bumping `internalReloadCount`) instead of permanently stopping with `isPermanentlyStoppedRef = true`. This prevents players from going permanently black after a 403 token expiry — they now remount with a fresh URL resolve and cache-busted proxy URL, identical to what a manual browser refresh does.
+
+### Added
+- **Vidio API URL resolution rewrite** (`lib/resolve.ts`): replaced regex-based `.m3u8` search with recursive JSON traversal (`findM3u8Urls()`). Handles nested objects, arrays, and multiple URL formats. On failure, logs the API response structure via `describeJsonStructure()` for debugging format changes.
+- **Visual freeze detection** (`hooks/use-frame-analyzer.ts`): canvas-based frame capture at 64×36 resolution every 2s. Compares consecutive frames — if 3+ samples are identical while video timecode advances, triggers "Video Stalled" alert. Catches decoder stalls and corrupted segments that current timecode-based stall detection misses.
+- **Video black frame detection**: reuses the same canvas pipeline. Computes average luminance per frame. If luminance stays below threshold (0.02/255) for 10+ continuous seconds, triggers "Video Black" alert. Clears automatically when luminance restores. Catches broadcast blackouts and source feed failures while the stream is technically still playing.
+- **Cross-stream error correlation**: `onStreamStatus` prop reports per-stream HTTP errors to the parent MultiViewer. When >50% of active streams share the same error type (e.g. HTTP 502) within a 30s rolling window, a yellow banner appears at the top of the grid (e.g. "Proxy unreachable (502)"). Per-stream recovery loops still run independently — the banner suppresses noise, not recovery.
+- **Better diagnostics on Vidio API resolve endpoint** (`/api/resolve`): logs HTTP status codes and top-level response keys to help debug `.m3u8` extraction failures at the server level.
+
+
+
 ---
 
 ## [2.1.1] - 2026-04-07
