@@ -18,11 +18,10 @@
 | 1.3 Visual freeze detection | `hooks/use-frame-analyzer.ts` (NEW), `video-player.tsx` | Done |
 | 1.4 Black frame detection | same hook — luminance path | Done |
 | 1.5 Cross-stream error correlation | `multiviewer.tsx` | Done |
-| 1.2 Recovery state machine | — | Deferred (see below) |
 
-### Deferred: 1.2 Recovery State Machine
+### Deleted: 1.2 Recovery State Machine
 
-Decision: skip as standalone item. The 7 refs (`hasFatalErrorRef`, `fatalErrorTypeRef`, `isPermanentlyStoppedRef`, etc.) exist for stale-closure bridging in timers/callbacks — a `useReducer` wouldn't eliminate them. Real maintainability win is 3.1 (component split into hooks). Recommend promoting 3.1 to Tier 1.
+Removed from roadmap — stale-closure refs can't be eliminated by useReducer. 3.1 (component split) is the real fix.
 
 ### Alert Triggers (current state)
 
@@ -49,8 +48,9 @@ Decision: skip as standalone item. The 7 refs (`hasFatalErrorRef`, `fatalErrorTy
 ### Roadmap
 
 `ROADMAP.md` has checkbox trackers. [x] = done, [ ] = pending.
-- T1: 4/5 done (1.2 deferred)
-- T2-T4: all pending
+- T1: 4/4 done
+- T2: 0/1 done (only Structured Logging remains)
+- T3-T4: all pending
 
 ### Build & Deploy
 

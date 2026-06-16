@@ -11,19 +11,6 @@
 - Add `resolvedUrl` field to the Stream type so the dashboard doesn't re-resolve on every remount
 - Log the actual API response shape on failure for debugging
 
-### [ ] 1.2 Recovery State Machine Consolidation
-**Problem:** Recovery logic is scattered across seven refs (`hasFatalErrorRef`, `fatalErrorTypeRef`, `isPermanentlyStoppedRef`, `recoverAttemptsRef`, `consecutiveErrorsRef`, `retryIntervalRef`, `internalReloadCount`). The interaction between them causes deadlocks (e.g., 403 → `isPermanentlyStoppedRef=true` blocking all further recovery).
-
-**Fix:** Single explicit state machine:
-```
-idle → resolving_url → playing → stalled → recovering → idling_forever
-                                    ↓           ↓
-                                  black    dead (unrecoverable)
-                                    ↓
-                                  no_audio
-```
-One `useReducer` instead of 7 `useRef` + `useState` combos. Every transition is explicit and debuggable. State can be logged per-stream for observability.
-
 ### [x] 1.3 Video Freeze Detection (Visual)
 **Problem:** Current stall detection only checks `video.currentTime` advancement. If timecode advances but frames are frozen (corrupted CDN segments, decoder stall, silent buffer corruption), no alert fires and the operator sees a frozen tile.
 
@@ -59,25 +46,9 @@ One `useReducer` instead of 7 `useRef` + `useState` combos. Every transition is 
 
 ---
 
-## Tier 2: Observability (operator visibility)
+## Tier 2: Observability (developer visibility)
 
-### [ ] 2.1 Per-Stream Status Overlay
-**Problem:** With 25+ tiles on screen, it's impossible to know which stream is in which recovery state without opening browser console.
-
-**Implementation:**
-- Small colored indicator on each tile showing state: green (playing), yellow (recovering), red (stalled/dead)
-- Toggle in header to show/hide debug overlay with error count + last error type + recovery attempt number
-- Click indicator to open stream details panel (full error log, current URL, CDN host)
-
-### [ ] 2.2 Dashboard Health Score
-**Problem:** No at-a-glance answer to "is everything ok?"
-
-**Implementation:**
-- Header shows `22/25 streams healthy` with color-coded count
-- Click to expand showing which streams are unhealthy and why
-- Optional audio alert (different from per-stream alarm) when health drops below configurable threshold
-
-### [ ] 2.3 Structured Logging
+### [ ] 2.1 Structured Logging
 **Problem:** All logs go to `console.log/warn/error` — unstructured, hard to filter in production.
 
 **Implementation:**
