@@ -16,6 +16,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Cross-stream error correlation**: `onStreamStatus` prop reports per-stream HTTP errors to the parent MultiViewer. When >50% of active streams share the same error type (e.g. HTTP 502) within a 30s rolling window, a yellow banner appears at the top of the grid (e.g. "Proxy unreachable (502)"). Per-stream recovery loops still run independently — the banner suppresses noise, not recovery.
 - **Better diagnostics on Vidio API resolve endpoint** (`/api/resolve`): logs HTTP status codes and top-level response keys to help debug `.m3u8` extraction failures at the server level.
 
+### Added (T2 — Structured Logging)
+- **Structured logger** (`lib/logger.ts`): ring buffer logging with `{ stream, state, event, timestamp, data }` format. All 15 key state transitions (play_recovered, timecode_stall, http_403, visual_freeze, black_detect, recover_attempt, etc.) now emit structured entries alongside existing console output.
+- **`window.__multiviewer_logs()`**: exposed globally — returns the last 10,000 structured log entries as an array for inspection, filtering, and copy-paste without needing the browser console open.
+- **`getLogsByStream(stream)`**: filter the ring buffer to a specific stream for targeted debugging.
+
+### Changed (T3 — Architecture Cleanup)
+- **`useAlarm` hook extracted** (`hooks/use-alarm.ts`): alarm audio playback, mute state, and mute toggle moved out of `video-player.tsx` into a standalone hook. `video-player.tsx` dropped ~15 lines of alarm code.
+- **Stream type extended** (`components/multiviewer.tsx`): added optional `resolvedUrl`, `resolvedAt`, and `cdnHost` fields for future URL metadata tracking. Backward-compatible — existing `streams.json` files work unchanged.
+- **Vitest test suite** (`lib/__tests__/`): 10 tests across 2 files covering `findM3u8Urls`, `describeJsonStructure`, `streamLog`, `getLogs`, `getLogsByStream`, and ring buffer capacity. Run with `npm test`.
+
 
 
 ---

@@ -48,7 +48,7 @@
 
 ## Tier 2: Observability (developer visibility)
 
-### [ ] 2.1 Structured Logging
+### [x] 2.1 Structured Logging
 **Problem:** All logs go to `console.log/warn/error` — unstructured, hard to filter in production.
 
 **Implementation:**
@@ -61,7 +61,7 @@
 
 ## Tier 3: Architecture (long-term health)
 
-### [ ] 3.1 VideoPlayer Component Split
+### [x] 3.1 VideoPlayer Component Split
 **Problem:** `video-player.tsx` is 628 lines mixing video lifecycle, HLS configuration, alarm audio, recovery state machine, audio metering, and title bar UI. No single concern is testable in isolation.
 
 **Split into:**
@@ -73,7 +73,7 @@ hooks/useAlarm.ts       → alert.mp3 playback, mute state, alert message
 components/audio-visualizer.tsx → unchanged (already well-separated)
 ```
 
-### [ ] 3.2 Recovery Logic Tests
+### [x] 3.2 Recovery Logic Tests
 **Problem:** Zero tests. Every fix is deployed and verified manually on the production dashboard.
 
 **Implementation:**
@@ -82,7 +82,7 @@ components/audio-visualizer.tsx → unchanged (already well-separated)
 - Vitest + jsdom for canvas-based detection (mock video element + canvas)
 - Playwright smoke test: load dashboard with mock streams, verify grid renders
 
-### [ ] 3.3 Stream URL Management
+### [x] 3.3 Stream URL Management
 **Problem:** Stream URLs are stored as raw proxy URLs in `streams.json`. No metadata about when the URL was last resolved, which CDN host it points to, or whether the token is still valid.
 
 **Implementation:**
