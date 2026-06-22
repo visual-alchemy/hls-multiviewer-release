@@ -75,6 +75,127 @@ Video Stalled (highest) → Video Black → No Sound (lowest)
 
 ## Architecture
 
+### Network & Deployment Topology
+
+```mermaid
+graph TB
+    subgraph "Client / Operator Browser"
+        A["Operator Dashboard UI (Grid Layout & Controls)"]
+    end
+
+    subgraph "Docker Host (hls-multiviewer deployment)"
+        subgraph "Instance 1: Primary-1 (Port 3111)"
+            B1["NGINX / OpenResty Proxy"]
+            C1["Next.js App Container"]
+            D1[("Volume: data_primary_1 (streams.json)")]
+        end
+        subgraph "Instance 2: Event-1 (Port 3115)"
+            B2["NGINX / OpenResty Proxy"]
+            C2["Next.js App Container"]
+            D2[("Volume: data_event_1 (streams.json)")]
+        end
+        subgraph "Instance 3: Konten-1 (Port 3116)"
+            B3["NGINX / OpenResty Proxy"]
+            C3["Next.js App Container"]
+            D3[("Volume: data_konten_1 (streams.json)")]
+        end
+    end
+
+    subgraph "External Network"
+        E["Vidio API (api.vidio.com)"]
+        F["Akamai CDN (*.akamaized.net)"]
+    end
+
+    A <-->|"Access UI / API"| B1
+    A <-->|"Access UI / API"| B2
+    A <-->|"Access UI / API"| B3
+
+    B1 <-->|"Proxy Pass (Port 3000)"| C1
+    B2 <-->|"Proxy Pass (Port 3000)"| C2
+    B3 <-->|"Proxy Pass (Port 3000)"| C3
+
+    C1 <-->|"Read/Write"| D1
+    C2 <-->|"Read/Write"| D2
+    C3 <-->|"Read/Write"| D3
+
+    C1 & C2 & C3 -->|"API Resolve Proxy"| E
+    B1 & B2 & B3 -->|"CORS Proxy (/primary/*)"| F
+
+    classDef external fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#ffffff
+    classDef ui fill:#581c87,stroke:#a855f7,stroke-width:3px,color:#ffffff
+    classDef backend fill:#166534,stroke:#22c55e,stroke-width:3px,color:#ffffff
+    classDef storage fill:#374151,stroke:#9ca3af,stroke-width:2px,color:#ffffff
+
+    class E,F external
+    class A ui
+    class B1,B2,B3,C1,C2,C3 backend
+    class D1,D2,D3 storage
+```
+
+### Stream Resolution, Playback & Alert Pipeline
+
+```mermaid
+graph TB
+    subgraph "Vidio Services"
+        API["Vidio API (api.vidio.com)"]
+        CDN["Akamai CDN (*.akamaized.net)"]
+    end
+
+    subgraph "Local Gateway (Docker / Next.js)"
+        R_API["API Resolve Endpoint (/api/resolve)"]
+        N_CORS["NGINX CORS Proxy (/primary/*)"]
+    end
+
+    subgraph "Browser Video Component (VideoPlayer)"
+        HLS_ENG["HLS.js Engine (decoding & buffering)"]
+        VID_EL["HTML5 Video Element"]
+        
+        subgraph "Active Analyzers"
+            FA["Frame Analyzer Hook (64x36 Offscreen Canvas)"]
+            AV["Audio Visualizer (Web Audio API AnalyzerNode)"]
+            EV["Video Events Listener (stalled / waiting / error)"]
+        end
+        
+        subgraph "Alert & Recovery Pipeline"
+            ALARM["Alarm Hook (useAlarm / alert.mp3)"]
+            LOG["Structured Logger (logger.ts / Ring Buffer)"]
+            REC["Recovery State Machine (Silent Retry & Reset)"]
+        end
+    end
+
+    %% Flow lines
+    R_API <-->|"Resolve Token"| API
+    HLS_ENG <-->|"Fetch Manifest/Segments"| N_CORS
+    N_CORS <-->|"CORS Bypass"| CDN
+
+    HLS_ENG -->|"Attach Media"| VID_EL
+    VID_EL -->|"1. Draw Frame (2s)"| FA
+    VID_EL -->|"2. Decode PCM"| AV
+    VID_EL -->|"3. Listen Events"| EV
+
+    FA -->|"A. Visual Freeze / Black"| ALARM
+    AV -->|"B. Silence (No Sound)"| ALARM
+    EV -->|"C. Fatal HLS / Network Errors"| ALARM
+
+    FA & AV & EV -->|"Emit Logs"| LOG
+    EV -->|"Trigger Recovery"| REC
+    
+    REC -->|"1. Re-init HLS / Silent Retry"| HLS_ENG
+    REC -->|"2. Hard Panel Reset (Token Expired)"| R_API
+
+    classDef external fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#ffffff
+    classDef proxy fill:#166534,stroke:#22c55e,stroke-width:3px,color:#ffffff
+    classDef player fill:#ea580c,stroke:#f97316,stroke-width:3px,color:#ffffff
+    classDef analyzer fill:#581c87,stroke:#a855f7,stroke-width:3px,color:#ffffff
+    classDef recovery fill:#991b1b,stroke:#ef4444,stroke-width:3px,color:#ffffff
+
+    class API,CDN external
+    class R_API,N_CORS proxy
+    class HLS_ENG,VID_EL player
+    class FA,AV,EV analyzer
+    class ALARM,LOG,REC recovery
+```
+
 ### Multi-Dashboard Deployment
 
 The project supports multiple isolated dashboard instances, each with its own:
