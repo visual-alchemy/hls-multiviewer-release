@@ -210,19 +210,52 @@ The project supports multiple isolated dashboard instances, each with its own:
 | `konten-1` | `3116` | `./data_konten_1` |
 
 ### NGINX Proxy
-
+ 
 Each instance runs an OpenResty (NGINX) proxy at the public port. It:
 1. Forwards all UI/API requests to the Next.js app container
 2. Proxies HLS CDN requests (e.g. `/primary/`, `/geo-id/`, `/hls-b/`) to Akamai on the server side, which avoids browser CORS restrictions for tokenized stream URLs
 
+### CORS Proxy & Bandwidth Mechanics
+
+Because browsers enforce CORS (Cross-Origin Resource Sharing), players cannot fetch manifest playlists (`.m3u8`) and video segments (`.ts`) directly from Vidio's CDN unless the CDN explicitly permits it. The dashboard solves this by reverse-proxying stream requests through the server's local NGINX instance.
+
+#### Bandwidth Routing Flow
+
+Depending on how a stream's URL is formatted in `streams.json`, network traffic and internet bandwidth will be drawn differently:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Client Browser (Operator)
+    participant Server as NGINX Proxy (Server Host)
+    participant CDN as Vidio CDN (Akamai Edge)
+
+    Note over Client, CDN: Playback via Proxied URL (/primary/*)
+    Client->>Server: 1. Request segment (e.g., segment_01.ts)
+    Note over Server: Caching disabled (proxy_no_cache = 1)
+    Server->>CDN: 2. Fetch segment_01.ts (Draws Server downstream internet)
+    CDN-->>Server: 3. Return segment bytes
+    Server-->>Client: 4. Forward segment bytes (Draws Server upstream internet)
+    Note over Client: Client browser decodes, visualizes, & analyzes frames
+
+    Note over Client, CDN: Playback via Direct CDN URL (https://*)
+    Client->>CDN: 1. Request segment directly (Draws Client internet only)
+    CDN-->>Client: 2. Return segment bytes (Requires CORS enabled on CDN)
+```
+
+#### Network Load Analysis
+
+| Playback Type | CORS Setup | Server Network Load | Client Network Load | Latency |
+|---|---|---|---|---|
+| **Proxied URL** (`/primary/*`) | ❌ None needed (same-origin) | 🔴 **High (Double-Draw)**<br/>Downloads from CDN and uploads to client for *every* viewer. | 🟢 **Normal**<br/>Downloads from local server. | 🟡 **Added Hop** |
+| **Direct URL** (`https://*`) | ⚠️ CORS enabled on CDN | 🟢 **Zero**<br/>Server acts only as a control-plane coordinator. | 🟢 **Normal**<br/>Downloads directly from CDN edge. | 🟢 **Direct / Lowest** |
+
+> [!WARNING]
+> Under the current uncached proxy model (`proxy_no_cache 1`), if multiple operators open the dashboard simultaneously, the server's public internet connection will become a bottleneck. The server downloads the same segments repeatedly for each concurrent user (Server Bandwidth = $2 \times N \times \text{Stream Bitrate}$).
+
 ### Stream URL Formats
 
-| Format | CORS Extension Needed? |
-|---|---|
-| Direct Akamai URL (`https://etslive-...akamaized.net/...`) | ✅ Yes — browser sees it as cross-origin |
-| Proxied URL (`/primary/etslive-...`) | ❌ No — browser sees it as same-origin, NGINX handles the rest |
-
-**Use the proxied format** (starting with `/primary/`, `/geo-id/`, etc.) whenever possible to avoid needing a CORS browser extension.
+Use the proxied format (starting with `/primary/`, `/geo-id/`, etc.) whenever possible to bypass CORS issues if you do not have control over the CDN configuration.
 
 ---
 
