@@ -38,6 +38,25 @@ export function streamLog(
   } else {
     console[level](prefix, message)
   }
+
+  // Send to persistent server-side file writer (Approach 1)
+  if (typeof window !== "undefined") {
+    fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stream,
+        state,
+        event,
+        message,
+        timestamp: entry.timestamp,
+        data,
+      }),
+    }).catch((err) => {
+      // Fail silently to prevent crashing UI if server logger goes down briefly
+      console.warn("Failed to write to server log file:", err)
+    })
+  }
 }
 
 export function getLogs(): LogEntry[] {

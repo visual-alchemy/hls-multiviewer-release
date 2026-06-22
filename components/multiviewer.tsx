@@ -8,7 +8,8 @@ import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { GridConfigDialog } from "@/components/grid-config-dialog"
 import { Button } from "@/components/ui/button"
-import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play } from "lucide-react"
+import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play, FileText } from "lucide-react"
+import { LogViewerDialog } from "@/components/log-viewer-dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,6 +55,8 @@ export default function MultiViewer() {
   const [isGridConfigOpen, setIsGridConfigOpen] = useState(false)
   // State for add stream dialog
   const [isAddStreamOpen, setIsAddStreamOpen] = useState(false)
+  // State for system logs dialog
+  const [isLogsOpen, setIsLogsOpen] = useState(false)
   // State for import confirmation dialog
   const [pendingImport, setPendingImport] = useState<Stream[] | null>(null)
   const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false)
@@ -423,6 +426,15 @@ export default function MultiViewer() {
           <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
             {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsLogsOpen(true)}
+            className="bg-gray-800 hover:bg-gray-700 text-white"
+            title="System Activity Logs"
+          >
+            <FileText className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={handleFullscreen} className="bg-gray-800 hover:bg-gray-700">
             <Maximize className="h-5 w-5" />
           </Button>
@@ -527,6 +539,9 @@ export default function MultiViewer() {
 
       {/* Add stream dialog */}
       <AddStreamDialog isOpen={isAddStreamOpen} onAdd={handleAddStream} onClose={() => setIsAddStreamOpen(false)} />
+
+      {/* System logs dialog */}
+      <LogViewerDialog isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
 
       {/* Edit stream dialog */}
       {editingStream && (
