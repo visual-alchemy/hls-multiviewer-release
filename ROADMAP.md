@@ -55,7 +55,10 @@
 - Create a lightweight structured logger: `{ stream, state, event, timestamp, data }`
 - Log to console AND to a client-side ring buffer (last 10,000 events)
 - Expose via `window.__multiviewer_logs` for remote debugging without browser console
-- Add `/api/log` endpoint for server-side aggregation (optional)
+- Add `/api/logs` endpoint for server-side aggregation, file rotation, and text downloads
+- **Daily log rotation**: Server-side file writer saving daily log files (`data/logs/{date}.log`) mapped to host directories.
+- **Auto-cleanup policy**: Automated 7-day log retention sweep that deletes log files older than 7 days.
+- **In-app Log console**: A terminal-styled modal on the dashboard for real-time monitoring and downloading today's logs.
 
 ---
 

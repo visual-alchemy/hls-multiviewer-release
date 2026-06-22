@@ -71,6 +71,16 @@ Video Stalled (highest) → Video Black → No Sound (lowest)
 - 403 errors trigger immediate hard-reset — no retry spam on an expired token
 - Alarm sound can be muted per-stream via the bell icon
 
+### System Logging & Diagnostics
+
+*   **Persistent Daily Log Files**: Writes all stream state transitions (e.g. `PLAYING`, `STALLED`, `NO SOUND`), recovery attempts, and critical errors to a server-side log file named `DD-MM-YYYY.log` under the volume-mounted `data/logs/` directory.
+*   **7-Day Log Retention Policy**: Automatically sweeps the logs directory on new writes to discard expired log files older than 7 days, maintaining a clean disk space footprint.
+*   **In-App Terminal Console**: A dedicated log icon in the header toolbar opens a terminal-style popup dialog showing today's logs with:
+    *   **Live Updates**: Auto-refresh updates (4-second polling) as events happen in the background.
+    *   **Syntax Highlighting**: Keywords are color-coded (red for errors, yellow for stalls/warnings, green for recoveries/playing) for fast visual auditing.
+    *   **Interactive Controls**: Buttons to close the modal or download/export today's log file directly.
+*   **Client Ring Buffer**: Keeps the last 10,000 structured logs in memory, accessible at any time via the browser devtools console using `window.__multiviewer_logs()`.
+
 ---
 
 ## Architecture
