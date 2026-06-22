@@ -12,19 +12,25 @@ interface DialogProps {
 export const Dialog = ({ open, onOpenChange, children, trigger }: DialogProps) => {
   return (
     <>
-      <div onClick={() => onOpenChange(true)}>{trigger}</div>
-      <div className={`fixed inset-0 z-50 flex items-center justify-center ${open ? "block" : "hidden"}`}>
+      {trigger && <div onClick={() => onOpenChange(true)}>{trigger}</div>}
+      <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${open ? "block" : "hidden"}`}>
         <div className="fixed inset-0 bg-black/50" onClick={() => onOpenChange(false)} />
-        <div className="relative z-50 w-full max-w-lg p-4 mx-auto">{children}</div>
+        {children}
       </div>
     </>
   )
 }
 
-export const DialogContent = ({ children }: { children: ReactNode }) => {
+export const DialogContent = ({ children, className }: { children: ReactNode; className?: string }) => {
+  const hasMaxWidth = className && className.includes("max-w-")
+  const defaultClasses = `relative z-50 w-full mx-auto bg-[#1f2937] text-white rounded-lg shadow-lg border border-gray-700 ${hasMaxWidth ? "" : "max-w-lg"}`
+  const isFlex = className && className.includes("flex-col")
+
   return (
-    <div className="relative bg-[#1f2937] text-white rounded-lg shadow-lg border border-gray-700">
-      <div className="p-6">{children}</div>
+    <div className={`${defaultClasses} ${className || ""}`}>
+      <div className={`p-6 max-h-[85vh] ${isFlex ? "h-full flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+        {children}
+      </div>
     </div>
   )
 }
