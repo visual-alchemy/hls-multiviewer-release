@@ -2,9 +2,20 @@
 
 ## Current Branch: `feat/vidio`
 
+## Session Summary (2026-06-22)
+
+### Completed (pushed to origin/feat/vidio)
+
+**Persistent Daily Logs & Rotation (T2.1):**
+- **Server API** (`app/api/logs/route.ts`): POST appends client-side stream transitions to date-named logs (`data/logs/{date}.log`) using the local Jakarta timezone. GET reads logs or triggers file attachment downloads.
+- **Auto-Cleanup**: Automatically sweeps the logs directory on write to delete log files older than 7 days.
+- **Log Viewer Dialog** (`components/log-viewer-dialog.tsx`): A terminal-styled modal featuring 4s live polling updates, a pulsing status indicator, auto-scroll to bottom, keyword color-coding, and export controls.
+- **Custom Dialog Pass-Through** (`components/ui/dialog.tsx`): Fixed `DialogContent` to pass-through custom classes, implementing container height limitations (`max-h-[85vh]`) and scroll overlays.
+- **Architecture Diagrams**: Added Mermaid sequence and topology diagrams to `README.md` mapping NGINX CORS proxy mechanics and multi-dashboard network flows.
+
 ## Session Summary (2026-06-16)
 
-### Completed (not pushed — waiting on local test)
+### Completed (pushed to origin/feat/vidio)
 
 **Bug fix:** Per-panel 403 recovery (`video-player.tsx:553-561`)
 - Recovery loop 403 handler now does `internalReloadCount++` instead of `isPermanentlyStoppedRef = true`
@@ -48,9 +59,10 @@ Removed from roadmap — stale-closure refs can't be eliminated by useReducer. 3
 ### Roadmap
 
 `ROADMAP.md` has checkbox trackers. [x] = done, [ ] = pending.
-- T1: 4/4 done
-- T2: 0/1 done (only Structured Logging remains)
-- T3-T4: all pending
+- T1 (Reliability): 4/4 done
+- T2 (Observability): 1/1 done (Structured Logging complete)
+- T3 (Architecture): 3/3 done (useAlarm, Stream types, and full Vitest suite complete)
+- T4 (Nice-to-Have): 0/3 pending
 
 ### Build & Deploy
 
@@ -71,10 +83,14 @@ npm run build                   # 0 errors, 0 warnings
 | File | Lines | Role |
 |------|-------|------|
 | `components/video-player.tsx` | ~670 | HLS lifecycle, recovery, alerts, UI |
-| `components/multiviewer.tsx` | ~572 | Grid layout, stream CRUD, error correlation |
+| `components/multiviewer.tsx` | ~580 | Grid layout, stream CRUD, error correlation |
+| `components/log-viewer-dialog.tsx` | ~110 | Terminal log console with live updates |
+| `components/ui/dialog.tsx` | ~55 | Dialog modal container with scroll overlays |
+| `app/api/logs/route.ts` | ~110 | Server-side daily log rotation & retention API |
 | `hooks/use-frame-analyzer.ts` | ~193 | Canvas freeze/black detection |
 | `lib/resolve.ts` | ~60 | Recursive .m3u8 URL search |
 | `app/api/resolve/route.ts` | ~48 | Proxy to Vidio API |
+| `lib/__tests__/logger-api.test.ts` | ~100 | Logging API unit test file |
 
 ### Known Quirks
 
