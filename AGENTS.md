@@ -9,6 +9,8 @@
 **Dependabot Automation (T4.4):**
 - **Config File** (`.github/dependabot.yml`): Created Dependabot configuration file to schedule weekly dependency security updates for npm packages and Docker images.
 - **Dependency Security Patches**: Patched 7 vulnerable packages (`next`, `picomatch`, `minimatch`, `lodash`, `glob`, `brace-expansion`) via `npm audit fix`, resolving 21/23 GitHub Dependabot alerts while keeping compatibility safe (building successfully and keeping all tests green).
+- **Auto-Merge Workflows** (`.github/workflows/`): Created CI pipeline (`ci.yml`) and Dependabot auto-merge configuration (`dependabot-auto-merge.yml`) to automatically test, approve, and merge incoming dependency pull requests.
+
 
 
 ## Session Summary (2026-06-22)

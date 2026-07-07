@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **GitHub Action CI pipeline** (`.github/workflows/ci.yml`): Runs automated linting, unit testing, and Next.js production builds on push/pull requests.
+- **Dependabot Auto-Merge workflow** (`.github/workflows/dependabot-auto-merge.yml`): Automates approval and merging of security/dependency pull requests once CI checks pass.
 - **Dependabot automation** (`.github/dependabot.yml`): Created configuration file to run weekly scans on npm dependencies and Docker base images, with grouping logic to cluster React-related upgrades.
 - **Vidio API URL resolution rewrite** (`lib/resolve.ts`): replaced regex-based `.m3u8` search with recursive JSON traversal (`findM3u8Urls()`). Handles nested objects, arrays, and multiple URL formats. On failure, logs the API response structure via `describeJsonStructure()` for debugging format changes.
 - **Visual freeze detection** (`hooks/use-frame-analyzer.ts`): canvas-based frame capture at 64×36 resolution every 2s. Compares consecutive frames — if 3+ samples are identical while video timecode advances, triggers "Video Stalled" alert. Catches decoder stalls and corrupted segments that current timecode-based stall detection misses.
