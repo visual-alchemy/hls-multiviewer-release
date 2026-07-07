@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # 1. Enable updates for npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/" # Root directory containing package.json
+    schedule:
+      interval: "weekly" # Check for updates weekly
+      day: "monday"
+    open-pull-requests-limit: 10 # Limit open dependency PRs to avoid noise
+    groups:
+      # Group related UI/react packages to minimize PR noise
+      react-dependencies:
+        patterns:
+          - "@radix-ui/*"
+          - "react"
+          - "react-dom"
+
+  # 2. Enable updates for Docker images and Dockerfiles
+  - package-ecosystem: "docker"
+    directory: "/" # Root directory containing Dockerfile & docker-compose.yml
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5

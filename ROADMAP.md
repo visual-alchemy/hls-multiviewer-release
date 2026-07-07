@@ -111,3 +111,7 @@ components/audio-visualizer.tsx → unchanged (already well-separated)
 - Single page to view status across all 3 Docker instances (primary, event, konten)
 - Instance health: CPU, memory, active streams, error rate
 - Would need a small `/api/health` endpoint exposing stream counts + uptime
+
+### [x] 4.4 Dependabot Security Updates
+- Configured automated security updates for both npm and Docker ecosystems via `.github/dependabot.yml`.
+

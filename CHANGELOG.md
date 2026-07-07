@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Dependabot automation** (`.github/dependabot.yml`): Created configuration file to run weekly scans on npm dependencies and Docker base images, with grouping logic to cluster React-related upgrades.
 - **Vidio API URL resolution rewrite** (`lib/resolve.ts`): replaced regex-based `.m3u8` search with recursive JSON traversal (`findM3u8Urls()`). Handles nested objects, arrays, and multiple URL formats. On failure, logs the API response structure via `describeJsonStructure()` for debugging format changes.
 - **Visual freeze detection** (`hooks/use-frame-analyzer.ts`): canvas-based frame capture at 64×36 resolution every 2s. Compares consecutive frames — if 3+ samples are identical while video timecode advances, triggers "Video Stalled" alert. Catches decoder stalls and corrupted segments that current timecode-based stall detection misses.
 - **Video black frame detection**: reuses the same canvas pipeline. Computes average luminance per frame. If luminance stays below threshold (0.02/255) for 10+ continuous seconds, triggers "Video Black" alert. Clears automatically when luminance restores. Catches broadcast blackouts and source feed failures while the stream is technically still playing.
@@ -17,8 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **In-app Log Viewer modal** (`components/log-viewer-dialog.tsx`): terminal-style dashboard console displaying today's system logs with color-coded alerts (errors in red, warnings/stalls in amber, playing in green). Includes a pulsing "Live Feed" status indicator, 4-second polling updates, auto-scroll to bottom, and direct log file export.
 
 ### Fixed
+- **Dependency vulnerabilities**: Patched 7 packages (`next`, `picomatch`, `minimatch`, `lodash`, `glob`, `brace-expansion`) via `npm audit fix` to resolve 21 out of 23 Dependabot alerts safely.
 - **Per-panel 403 recovery**: when a stream token expires during the recovery loop, the panel now performs an internal hard-reset (bumping `internalReloadCount`) instead of permanently stopping with `isPermanentlyStoppedRef = true`. This prevents players from going permanently black after a 403 token expiry — they now remount with a fresh URL resolve and cache-busted proxy URL, identical to what a manual browser refresh does.
 - **Custom Dialog pass-through & scroll fix** (`components/ui/dialog.tsx`): updated the DialogContent component to support `className` overrides and enforce a maximum height of `85vh` with internal scrolling to prevent viewport overflows.
+
 
 ### Added (T2 — Structured Logging)
 - **Structured logger** (`lib/logger.ts`): ring buffer logging with `{ stream, state, event, timestamp, data }` format. All 15 key state transitions (play_recovered, timecode_stall, http_403, visual_freeze, black_detect, recover_attempt, etc.) now emit structured entries alongside existing console output.
