@@ -1,23 +1,31 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import Hls from "hls.js"
-import { Edit2, Trash2, Pause, Play, Bell, BellOff } from "lucide-react"
+import { Edit2, Trash2, Pause, Play, Bell, BellOff, Expand } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AudioVisualizer } from "./audio-visualizer"
+import { useFrameAnalyzer } from "@/hooks/use-frame-analyzer"
+import { streamLog } from "@/lib/logger"
+import { useAlarm } from "@/hooks/use-alarm"
 
 interface VideoPlayerProps {
   url: string
   title: string
   onEdit: () => void
   onDelete: () => void
-  isMuted: boolean
-  isFullscreen: boolean
-  playbackCommand: {
+  onSolo?: () => void
+  isMuted?: boolean
+  isFullscreen?: boolean
+  isSoloed?: boolean
+  playbackCommand?: {
     action: "play" | "pause"
     id: number
   }
   startDelayMs?: number
+  onFatalError?: (reason: "token_expired" | "stream_down") => void
+  /** Reports per-stream error status to parent for cross-stream correlation (Tier 1.5) */
+  onStreamStatus?: (status: { type: string; title: string }) => void
 }
 
 export function VideoPlayer({
@@ -25,60 +33,139 @@ export function VideoPlayer({
   title,
   onEdit,
   onDelete,
-  isMuted,
-  isFullscreen,
+  onSolo,
+  isMuted = false,
+  isFullscreen = false,
+  isSoloed = false,
   playbackCommand,
   startDelayMs = 0,
+  onFatalError,
+  onStreamStatus,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const [hasFatalError, setHasFatalError] = useState(false)
+  const hasFatalErrorRef = useRef(false) // mirrors hasFatalError for use in stale closures
   const [hasStreamError, setHasStreamError] = useState(false)
   const [isSilent, setIsSilent] = useState(false)
+  const [isBlack, setIsBlack] = useState(false)
+  const isBlackRef = useRef(false)
   const [isPaused, setIsPaused] = useState(false)
-  const [isAlarmMuted, setIsAlarmMuted] = useState(false)
+  const isPausedRef = useRef(false) // mirrors isPaused for the setInterval closure
   const fatalTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null) // ref to the recovery interval so we can clear it immediately on recovery
+  const isPermanentlyStoppedRef = useRef(false) // set when recovery permanently gives up
   const recoverAttemptsRef = useRef(0)
   const consecutiveErrorsRef = useRef(0)
+  // Records the type of error that triggered hasFatalError, so the recovery interval
+  // knows from tick 1 whether to do a 403-path (dashboard reload) or stream-down (silent retry).
+  const fatalErrorTypeRef = useRef<"403" | "stream_down" | null>(null)
   const lastPlayingTimeRef = useRef<number>(Date.now())
+  const lastCurrentTimeRef = useRef<number>(0) // tracks video.currentTime to detect genuine freeze
+  const activeUrlRef = useRef<string>(url) // stores resolved URL so recovery reinit uses fresh token
+  const [internalReloadCount, setInternalReloadCount] = useState(0)
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  // Video Stalled takes priority over No Sound when stream has errors
-  const showAlert = hasFatalError || (isSilent && !hasStreamError)
-  const alertMessage = hasFatalError ? "Video Stalled" : (isSilent && !hasStreamError) ? "No Sound" : null
+  // "Video Stalled" takes priority over "Video Black" over "No Sound".
+  const showAlert = hasFatalError || (isBlack && !hasStreamError) || (isSilent && !hasStreamError)
+  const alertMessage = hasFatalError ? "Video Stalled" : (isBlack && !hasStreamError) ? "Video Black" : (isSilent && !hasStreamError) ? "No Sound" : null
+
+  // Intercepts onSilenceChange from AudioVisualizer.
+  // If silence fires while video is frozen → escalate to "Video Stalled" + recovery.
+  // If silence fires while video is moving → genuine "No Sound", alert only.
+  const handleSilenceChange = useCallback((silent: boolean) => {
+    if (!silent) {
+      setIsSilent(false)
+      return
+    }
+    // Already in fatal error state or intentionally paused — don't override or alert
+    if (hasFatalErrorRef.current || isPausedRef.current) return
+
+    const video = videoRef.current
+    if (!video) {
+      setIsSilent(true)
+      return
+    }
+
+    const currentTime = video.currentTime
+    const isVideoMoving = currentTime !== lastCurrentTimeRef.current
+
+    if (isVideoMoving) {
+      // True "No Sound": video is running but audio is silent — alert only, no recovery
+            console.log(`[${title}] True silence detected (video moving at ${currentTime}s) → No Sound alert`)
+              streamLog(title, "silent", "true_silence", "log", "True silence — video moving, no audio", { currentTime })
+              setIsSilent(true)
+    } else {
+      // Video is frozen: silence is a symptom of a dead stream — escalate to Video Stalled
+          console.log(`[${title}] Silence detected with frozen video (stuck at ${currentTime}s) → escalating to Video Stalled`)
+              streamLog(title, "stalled", "silence_frozen", "warn", "Silence + frozen — escalating to Video Stalled", { currentTime })
+              fatalErrorTypeRef.current = "stream_down"
+      hasFatalErrorRef.current = true
+      setHasFatalError(true)
+      // isSilent stays false — "Video Stalled" takes over the alert
+    }
+  }, [title])
 
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
+    let isMounted = true
+
+    const delay = internalReloadCount > 0 ? 100 : startDelayMs
     const startTimer = setTimeout(() => {
-      if (url.includes(".m3u8")) {
-        if (Hls.isSupported()) {
-          const hls = new Hls({
-            lowLatencyMode: false,
-            liveSyncDurationCount: 8,
-            liveMaxLatencyDurationCount: 25,
-            backBufferLength: 120,
-            maxMaxBufferLength: 90,
-            maxBufferSize: 160 * 1024 * 1024,
-            fragLoadingRetryDelay: 1000,
-            fragLoadingMaxRetry: 5,
-            manifestLoadingRetryDelay: 1000,
-            manifestLoadingMaxRetry: 5,
-            xhrSetup: function (xhr, url) {
-              xhr.setRequestHeader("x-monitoring-token", "monitoringtoken")
-            },
-          })
+      if (!isMounted) return
+      
+      const initStream = async () => {
+        let activeUrl = url;
+        activeUrlRef.current = url;
+
+        if (activeUrl.includes(".m3u8") || activeUrl.includes("manifest")) {
+          if (Hls.isSupported()) {
+            const hls = new Hls({
+              enableWorker: true,
+              lowLatencyMode: false,
+              liveSyncDurationCount: 8,
+              liveMaxLatencyDurationCount: 25,
+              liveDurationInfinity: true,
+              backBufferLength: 120,
+              maxMaxBufferLength: 90,
+              maxBufferSize: 160 * 1024 * 1024,
+              fragLoadingRetryDelay: 1000,
+              fragLoadingMaxRetry: 10,
+              manifestLoadingRetryDelay: 1000,
+              manifestLoadingMaxRetry: 10,
+              startLevel: 0, // Force start at lowest resolution (360p or less)
+              capLevelToPlayerSize: true, // Never load higher resolution than the box size
+            })
+          
           hlsRef.current = hls
-          hls.loadSource(url)
+          const sourceUrl = internalReloadCount > 0 
+            ? `${activeUrl}${activeUrl.includes('?') ? '&' : '?'}panelReload=${internalReloadCount}` 
+            : activeUrl
+
+          hls.loadSource(sourceUrl)
           hls.attachMedia(video)
 
           const handlePlaying = () => {
             setHasFatalError(false)
+            hasFatalErrorRef.current = false
+            fatalErrorTypeRef.current = null // reset error type on successful recovery
             setHasStreamError(false)
             setIsPaused(false)
+            isPausedRef.current = false
+            setIsBlack(false)
+            isBlackRef.current = false
             recoverAttemptsRef.current = 0
             consecutiveErrorsRef.current = 0
+            isPermanentlyStoppedRef.current = false // allow future recovery attempts
             lastPlayingTimeRef.current = Date.now()
+            lastCurrentTimeRef.current = video.currentTime // snapshot for stall detection
+            streamLog(title, "playing", "play_recovered", "log", "Stream recovered — playing")
+            // Immediately clear the retry interval so it stops as soon as stream recovers
+            if (retryIntervalRef.current) {
+              clearInterval(retryIntervalRef.current)
+              retryIntervalRef.current = null
+            }
             if (fatalTimerRef.current) {
               clearTimeout(fatalTimerRef.current)
               fatalTimerRef.current = null
@@ -86,10 +173,29 @@ export function VideoPlayer({
           }
 
           // Track video stall/waiting events
+          // OLD BUG: relied on lastPlayingTimeRef ("playing" event fires once on start,
+          // NOT continuously during playback). After 15+ seconds of normal playback,
+          // any browser "stalled"/"waiting" event (common during live HLS buffer refills)
+          // would trigger a false "Video Stalled" alert.
+          // FIX: compare video.currentTime snapshots. If currentTime hasn't advanced
+          // in 15+ seconds, playback is genuinely frozen.
           const handleStall = () => {
-            const timeSinceLastPlaying = Date.now() - lastPlayingTimeRef.current
-            if (timeSinceLastPlaying > 15000 && !hasFatalError) {
-              console.log("Video stalled for 15+ seconds, triggering alert")
+            // Guard: if alarm already active or video intentionally paused, do nothing
+            if (hasFatalErrorRef.current || isPausedRef.current) return
+            const currentTime = video.currentTime
+            const timeSinceUpdate = Date.now() - lastPlayingTimeRef.current
+            // If currentTime is advancing, playback is fine — update the snapshot
+            if (currentTime !== lastCurrentTimeRef.current) {
+              lastCurrentTimeRef.current = currentTime
+              lastPlayingTimeRef.current = Date.now()
+              return
+            }
+            // currentTime hasn't changed — check for how long
+            if (timeSinceUpdate > 15000) {
+              streamLog(title, "stalled", "timecode_stall", "warn", `Frozen for 15+ seconds (currentTime stuck at ${currentTime}s)`, { currentTime, timeSinceUpdate })
+              console.log(`[${title}] Video genuinely frozen for 15+ seconds (currentTime stuck at ${currentTime}s). Triggering alert.`)
+              fatalErrorTypeRef.current = "stream_down"
+              hasFatalErrorRef.current = true
               setHasFatalError(true)
             }
           }
@@ -127,39 +233,90 @@ export function VideoPlayer({
           }
 
           hls.on(Hls.Events.ERROR, function (event, data) {
-            console.log("HLS Error:", data)
             if (data.fatal) {
-              // Immediately attempt recovery based on error type
-              switch (data.type) {
-                case Hls.ErrorTypes.NETWORK_ERROR:
-                  console.log("Network error, attempting startLoad recovery...")
-                  hls.startLoad()
-                  break
-                case Hls.ErrorTypes.MEDIA_ERROR:
-                  console.log("Media error, attempting recoverMediaError...")
-                  hls.recoverMediaError()
-                  break
-                default:
-                  console.log("Unknown fatal error type:", data.type)
-                  break
+              console.error(`[${title}] Fatal HLS Error:`, data.details, `(type: ${data.type})`)
+              // levelParsingError: the CDN returned HTTP 200 but the body is not valid M3U8
+              // (e.g. nginx Lua filter stripped all variants, or CDN served an HTML error page).
+              // Calling startLoad() is WRONG here — it reloads the same corrupt content in a
+              // tight loop. Instead, stop the instance and let the recovery loop handle it.
+      if (data.details === 'levelParsingError') {
+        streamLog(title, "stalled", "level_parse", "warn", "levelParsingError — hard panel reset")
+        console.warn(`[${title}] levelParsingError - performing internal panel hard-reset...`)
+                setInternalReloadCount(prev => prev + 1)
+                hls.destroy()
+              } else {
+                switch (data.type) {
+                  case Hls.ErrorTypes.NETWORK_ERROR:
+                    console.log(`[${title}] Network error, attempting startLoad recovery...`)
+                    hls.startLoad()
+                    break
+                  case Hls.ErrorTypes.MEDIA_ERROR:
+                    console.log(`[${title}] Media error, attempting recoverMediaError...`)
+                    hls.recoverMediaError()
+                    break
+                  default:
+                    console.log(`[${title}] Unknown fatal error type:`, data.type)
+                    break
+                }
               }
-              // Set timer for UI indication if recovery doesn't work
               if (!fatalTimerRef.current) {
                 fatalTimerRef.current = setTimeout(() => {
+                  streamLog(title, "stalled", "fatal_error", "error", "Fatal HLS error after 10s timer", { details: data.details, type: data.type })
+                  fatalErrorTypeRef.current = "stream_down"
+                  hasFatalErrorRef.current = true
                   setHasFatalError(true)
                   fatalTimerRef.current = null
                 }, 10000)
               }
             } else {
-              // Track non-fatal errors (like fragLoadError with 404s)
-              consecutiveErrorsRef.current += 1
-              setHasStreamError(true)
-              console.log("Non-fatal error count:", consecutiveErrorsRef.current)
+              const httpCode = (data.response as any)?.code
+              // Report per-stream status for cross-stream correlation (Tier 1.5)
+              if (onStreamStatus && httpCode) {
+                onStreamStatus({ type: `http_${httpCode}`, title })
+              }
+              if (httpCode === 403) {
+                streamLog(title, "stalled", "http_403", "warn", "Token expired — hard panel reset", { httpCode })
+                console.warn(`[${title}] 403 Token Expired. Performing internal panel hard-reset to fetch new token...`)
+                setInternalReloadCount(prev => prev + 1)
+                
+                // Clear fatal states so the new instance starts clean
+                hasFatalErrorRef.current = false
+                fatalErrorTypeRef.current = null
+                setHasFatalError(false)
+                isPermanentlyStoppedRef.current = false
+                
+                hls.stopLoad()
+                hls.destroy()
+                hlsRef.current = null
+                
+                if (onFatalError) onFatalError("token_expired")
+                return
+              }
 
-              // If too many consecutive non-fatal errors, treat as stalled (lowered threshold for faster detection)
-              if (consecutiveErrorsRef.current >= 3) {
-                console.log("Too many consecutive errors, triggering stall alert")
-                setHasFatalError(true)
+              // Non-fatal network errors: count toward circuit breaker threshold.
+              // Once threshold hit, stop loading to prevent ERR_INSUFFICIENT_RESOURCES
+              // browser crash from thousands of tight-loop requests.
+              // bufferStalledError is excluded as it is self-healing and very frequent.
+              if (data.details !== 'bufferStalledError' &&
+                  (data.type === Hls.ErrorTypes.NETWORK_ERROR || data.details === 'bufferSeekOverHole')) {
+                consecutiveErrorsRef.current += 1
+                setHasStreamError(true)
+                // Report network error to parent for cross-stream correlation
+                if (onStreamStatus && !httpCode) {
+                  onStreamStatus({ type: "network", title })
+                  streamLog(title, "stalled", "network_error", "warn", `Non-fatal network error #${consecutiveErrorsRef.current}`, { details: data.details })
+                }
+
+                if (consecutiveErrorsRef.current >= 10) {
+                  // Circuit breaker: stream is effectively down (404, network error, etc.)
+                  // Stop making requests and enter the silent retry loop.
+                  streamLog(title, "stalled", "circuit_breaker", "warn", `${consecutiveErrorsRef.current} errors — entering stream-down retry`)
+                  console.log(`[${title}] Circuit breaker: ${consecutiveErrorsRef.current} errors. Entering stream-down retry.`)
+                  fatalErrorTypeRef.current = "stream_down"
+                  hls.stopLoad()
+                  hasFatalErrorRef.current = true
+                  setHasFatalError(true)
+                }
               }
             }
           })
@@ -179,14 +336,21 @@ export function VideoPlayer({
           }
         }
       } else {
-        video.src = url
+        video.src = activeUrl
       }
-    }, startDelayMs)
+      
+      }
+      initStream()
+    }, delay)
 
     return () => {
       clearTimeout(startTimer)
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
     }
-  }, [url, startDelayMs])
+  }, [url, startDelayMs, internalReloadCount])
 
   useEffect(() => {
     if (!playbackCommand) return
@@ -195,80 +359,225 @@ export function VideoPlayer({
     if (playbackCommand.action === "play") {
       video.play().catch((err) => console.error("Error resuming video:", err))
       setIsPaused(false)
+      isPausedRef.current = false
     } else {
       video.pause()
       setIsPaused(true)
+      isPausedRef.current = true
     }
   }, [playbackCommand])
+
+  // Alarm audio management (3.1 — extracted into useAlarm hook)
+  const { isMuted: isAlarmMuted, isMutedRef: isAlarmMutedRef, toggleMute: toggleAlarmMute } = useAlarm(showAlert)
+
+  // Dynamically switch quality when solo mode changes
+  useEffect(() => {
+    const hls = hlsRef.current
+    if (!hls) return
+
+    if (isSoloed) {
+      console.log(`Setting stream ${title} to Auto Quality (Solo Mode)`)
+      hls.currentLevel = -1 // Auto
+    } else {
+      console.log(`Setting stream ${title} to Low Quality (Grid Mode)`)
+      hls.currentLevel = 0 // Lowest
+    }
+  }, [isSoloed, title])
 
   const handleTogglePlayback = () => {
     const video = videoRef.current
     if (!video) return
-    if (video.paused) {
-      video.play().then(() => setIsPaused(false)).catch((err) => console.error("Error resuming video:", err))
+    
+    if (isPaused) {
+      // User wants to resume playback
+      setIsPaused(false)
+      isPausedRef.current = false
+      
+      // If the stream is not in a fatal error state, resume normal playback
+      if (!hasFatalErrorRef.current) {
+        video.play().catch((err) => console.error("Error resuming video:", err))
+      }
     } else {
+      // User wants to pause playback
       video.pause()
       setIsPaused(true)
+      isPausedRef.current = true
     }
   }
 
   useEffect(() => {
-    let audio: HTMLAudioElement | null = null
-    if (showAlert && !isAlarmMuted) {
-      audio = new Audio("/alert.mp3")
-      audio.loop = true
-      audio.play().catch(e => console.error("Error playing audio:", e))
-    }
-    return () => {
-      if (audio) {
-        audio.pause()
-        audio.currentTime = 0
-      }
-    }
-  }, [showAlert, isAlarmMuted])
-
-  useEffect(() => {
-    if (!hasFatalError) {
+    if (!hasFatalError || isPermanentlyStoppedRef.current) {
       return
     }
 
-    const hls = hlsRef.current
+    // Guard: if a recovery interval is already running, do NOT spawn a second one.
+    if (retryIntervalRef.current !== null) {
+      console.log(`[${title}] Recovery interval already running — skipping duplicate.`)
+      return
+    }
+
     const video = videoRef.current
-    if (!hls || !video) {
+    if (!video) return
+
+    const recoveryMode = fatalErrorTypeRef.current ?? "stream_down"
+
+    // If 403 somehow reaches here, bail — it's handled by internalReloadCount now.
+    if (recoveryMode === "403") {
       return
     }
 
-    const retryInterval = setInterval(() => {
-      console.log("Attempting to recover stream, attempt:", recoverAttemptsRef.current + 1)
+    console.log(`[${title}] Entering recovery loop. Mode: stream_down`)
+
+    const attemptRecovery = () => {
+      if (isPausedRef.current) return
+
+      if (isPermanentlyStoppedRef.current) {
+        if (retryIntervalRef.current) {
+          clearInterval(retryIntervalRef.current)
+          retryIntervalRef.current = null
+        }
+        return
+      }
+
       recoverAttemptsRef.current += 1
 
-      // Reset consecutive error count on recovery attempt
+      // Stream-down path: retry silently forever — no page reload.
+      // Reset counter every 6 so it doesn't overflow, but keep retrying indefinitely.
+      if (recoverAttemptsRef.current >= 6) {
+        console.log(`[${title}] Stream-down: still offline after 30s, continuing silent retry...`)
+        recoverAttemptsRef.current = 0
+        return
+      }
+      streamLog(title, "recovering", "recover_attempt", "log", `Reinit attempt ${recoverAttemptsRef.current}`)
+      console.log(`[${title}] Stream-down — reinit attempt ${recoverAttemptsRef.current}`)
+
       consecutiveErrorsRef.current = 0
 
-      // Full reload of manifest every attempt to discover new segments
-      console.log("Reloading HLS manifest...")
-      hls.stopLoad()
-      hls.loadSource(url)
-      hls.startLoad()
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
 
-      // Also try recoverMediaError in case of codec issues
-      hls.recoverMediaError()
+      video.removeAttribute("src")
+      video.load()
 
-      // Always try to play after recovery attempt
-      video.play().catch(err => console.log("Play after recovery failed:", err))
-    }, 5000)
+      const newHls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 8,
+        liveMaxLatencyDurationCount: 25,
+        liveDurationInfinity: true,
+        backBufferLength: 120,
+        maxMaxBufferLength: 90,
+        maxBufferSize: 160 * 1024 * 1024,
+        fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetry: 10,
+        manifestLoadingRetryDelay: 1000,
+        manifestLoadingMaxRetry: 10,
+      })
+
+      hlsRef.current = newHls
+      // Use the resolved URL (activeUrlRef) so reinit doesn't load an expired token URL
+      newHls.loadSource(activeUrlRef.current)
+      newHls.attachMedia(video)
+
+      // Monitor errors on the reinit instance during stream-down recovery.
+      newHls.on(Hls.Events.ERROR, function (_, data) {
+        const httpCode = (data.response as any)?.code
+        if (httpCode === 403) {
+          streamLog(title, "stalled", "http_403", "warn", "403 on recovery instance — hard panel reset")
+          console.warn(`[${title}] 403 on reinit instance during stream-down recovery. Performing internal panel hard-reset to fetch fresh token.`)
+          if (hlsRef.current === newHls) {
+            newHls.stopLoad()
+            newHls.destroy()
+            hlsRef.current = null
+          }
+          if (retryIntervalRef.current) {
+            clearInterval(retryIntervalRef.current)
+            retryIntervalRef.current = null
+          }
+          // Reset fatal state so recovery loop doesn't re-spawn,
+          // then bump internalReloadCount to fully remount the panel
+          // with a fresh URL resolve and cache-busted proxy URL.
+          isPermanentlyStoppedRef.current = false
+          hasFatalErrorRef.current = false
+          fatalErrorTypeRef.current = null
+          setHasFatalError(false)
+          setInternalReloadCount(prev => prev + 1)
+        }
+        if (data.fatal && data.details === 'levelParsingError') {
+          // levelParsingError on reinit: CDN/proxy still returning corrupt content.
+          // Stop this instance immediately — the next interval tick will create a fresh one.
+          console.warn(`[${title}] levelParsingError on reinit — stopping, will retry next tick.`)
+          if (hlsRef.current === newHls) {
+            newHls.stopLoad()
+            newHls.destroy()
+            hlsRef.current = null
+          }
+        }
+      })
+
+      video.play().catch(err => console.log(`[${title}] Play after reinit failed:`, err))
+    }
+
+    // Fire recovery instantly so we don't wait 5s frozen before the first attempt
+    attemptRecovery()
+    
+    // Then poll every 5s if it still hasn't recovered
+    const retryInterval = setInterval(attemptRecovery, 5000)
+    retryIntervalRef.current = retryInterval
 
     return () => {
       clearInterval(retryInterval)
+      retryIntervalRef.current = null
+      // We explicitly DO NOT destroy hlsRef.current here.
+      // If the stream recovers successfully, hasFatalError becomes false, 
+      // which triggers this cleanup. Destroying it here would instantly kill the recovered stream!
+      // Global cleanup is handled by the initStream useEffect.
+      fatalErrorTypeRef.current = null
     }
-  }, [hasFatalError, url])
+  }, [hasFatalError, url, title])
+
+  // Visual freeze + black frame detection (Tier 1.3 / 1.4)
+  useFrameAnalyzer(
+    videoRef,
+    {
+      enabled: !hasFatalError && !hasStreamError && !isPaused,
+      intervalMs: 2000,
+      freezeThreshold: 3,
+      blackThreshold: 0.02,
+      blackDurationMs: 10000,
+    },
+    {
+      onFreeze: () => {
+        if (hasFatalErrorRef.current || isPausedRef.current) return
+        streamLog(title, "stalled", "visual_freeze", "warn", "Visual freeze detected — frames identical while timecode advances")
+        console.log(`[${title}] Visual freeze detected — frames identical while timecode advances. Triggering alert.`)
+        fatalErrorTypeRef.current = "stream_down"
+        hasFatalErrorRef.current = true
+        setHasFatalError(true)
+      },
+      onBlack: () => {
+        streamLog(title, "black", "black_detect", "warn", "Video Black — luminance below threshold 10s+")
+        console.log(`[${title}] Video Black detected — luminance below threshold for 10s+.`)
+        isBlackRef.current = true
+        setIsBlack(true)
+      },
+      onBlackCleared: () => {
+        streamLog(title, "playing", "black_clear", "log", "Video Black cleared — luminance restored")
+        console.log(`[${title}] Video Black cleared — luminance restored.`)
+        isBlackRef.current = false
+        setIsBlack(false)
+      },
+    },
+  )
 
   return (
     <div className={`relative rounded-lg overflow-hidden bg-black flex h-full w-full ${showAlert ? "blinking-border" : ""}`}>
       {/* Video element */}
       <div className="h-full w-full">
         <div className="relative h-full w-full">
-          <video ref={videoRef} className="w-full h-full object-contain" autoPlay />
+          <video ref={videoRef} className="w-full h-full object-contain" crossOrigin="anonymous" autoPlay />
           {alertMessage && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
               <span className="text-white text-lg font-semibold drop-shadow">{alertMessage}</span>
@@ -282,7 +591,18 @@ export function VideoPlayer({
         <div className="flex justify-between items-center px-2 py-1 bg-black bg-opacity-50">
           <p className="text-white text-sm font-medium truncate">{title}</p>
           <div className="flex gap-1 shrink-0">
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={() => setIsAlarmMuted(!isAlarmMuted)}>
+            {onSolo && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSolo}
+                className="h-6 w-6 text-white hover:bg-black/20"
+                title="Solo Stream"
+              >
+                <Expand className="h-3 w-3" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={toggleAlarmMute}>
               {isAlarmMuted ? <BellOff className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
             </Button>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-black/20" onClick={handleTogglePlayback}>
@@ -300,7 +620,7 @@ export function VideoPlayer({
 
       {/* Audio visualizer (also handles audio routing/muting) */}
       <div className="absolute right-2 top-10 bottom-2 z-10 flex items-center">
-        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={setIsSilent} hasStreamError={hasStreamError} />
+        <AudioVisualizer videoRef={videoRef} isMuted={isMuted} onSilenceChange={handleSilenceChange} hasStreamError={hasStreamError} />
       </div>
     </div>
   )

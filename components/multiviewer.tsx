@@ -2,19 +2,36 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import Image from "next/image"
 import { VideoPlayer } from "@/components/video-player"
 import { AddStreamDialog } from "@/components/add-stream-dialog"
 import { GridConfigDialog } from "@/components/grid-config-dialog"
 import { Button } from "@/components/ui/button"
-import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play } from "lucide-react"
+import { Maximize, Plus, Volume2, VolumeX, Download, Upload, Grid, Pause, Play, FileText } from "lucide-react"
+import { LogViewerDialog } from "@/components/log-viewer-dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { useToast } from "@/components/ui/use-toast"
+import { Toaster } from "@/components/ui/toaster"
+import { streamLog } from "@/lib/logger"
 
 // Define the structure of a stream object
 interface Stream {
   id: string
   title: string
   url: string
+  resolvedUrl?: string
+  resolvedAt?: number
+  cdnHost?: string
 }
 
 export default function MultiViewer() {
@@ -38,6 +55,22 @@ export default function MultiViewer() {
   const [isGridConfigOpen, setIsGridConfigOpen] = useState(false)
   // State for add stream dialog
   const [isAddStreamOpen, setIsAddStreamOpen] = useState(false)
+  // State for system logs dialog
+  const [isLogsOpen, setIsLogsOpen] = useState(false)
+  // State for import confirmation dialog
+  const [pendingImport, setPendingImport] = useState<Stream[] | null>(null)
+  const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false)
+
+  // State for soft reload mechanism
+  const [softReloadKey, setSoftReloadKey] = useState(0)
+  const [fatalErrorCount, setFatalErrorCount] = useState(0)
+  const reloadTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Cross-stream error correlation (Tier 1.5)
+  const [streamCorrelationBanner, setStreamCorrelationBanner] = useState<string | null>(null)
+  const streamErrorsRef = useRef<Map<string, { type: string; time: number }>>(new Map())
+
+  const { toast } = useToast()
 
   // Load streams from the API when component mounts
   useEffect(() => {
@@ -56,6 +89,30 @@ export default function MultiViewer() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
     }
   }, [])
+
+  // Effect to trigger a HARD page reload when fatal 403 errors occur.
+  // A React-level soft remount does NOT work for 403 recovery because:
+  //   1. The HLS master URL itself is still valid (hdnts token = 1 year).
+  //   2. But Akamai embeds short-lived HDNTL tokens inside the playlist responses.
+  //   3. A soft remount reuses the same URL → browser HTTP cache serves the stale playlist
+  //      with expired HDNTL tokens → 403 on segments again → infinite loop.
+  // A full window.location.reload() clears the browser HTTP cache, forcing fresh
+  // manifest fetches from the CDN with new HDNTL tokens — exactly like a manual F5.
+  useEffect(() => {
+    /* 
+    DISABLED: Relying on per-panel hard reset (internalReloadCount) to recover from 403s
+    instead of refreshing the entire dashboard.
+    
+    if (fatalErrorCount > 0 && !reloadTimerRef.current) {
+      console.log(`Detected ${fatalErrorCount} stream failure(s). Triggering HARD page reload in 5s...`)
+
+      reloadTimerRef.current = setTimeout(() => {
+        console.log("Executing hard page reload to clear stale Akamai HDNTL tokens.")
+        window.location.reload()
+      }, 5000)
+    }
+    */
+  }, [fatalErrorCount])
 
   // Load grid configuration from localStorage
   useEffect(() => {
@@ -180,12 +237,14 @@ export default function MultiViewer() {
     linkElement.click()
   }
 
-  // Function to import streams
+  // Function to import streams — step 1: parse file and show confirmation
   const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
+    // Reset input value so re-selecting same file still triggers onChange
+    event.target.value = ""
     if (file) {
       const reader = new FileReader()
-      reader.onload = async (e) => {
+      reader.onload = (e) => {
         try {
           const content = e.target?.result
           if (typeof content === "string") {
@@ -193,30 +252,56 @@ export default function MultiViewer() {
             if (!Array.isArray(importedStreams)) {
               throw new Error("Imported data is not an array")
             }
-            const response = await fetch("/api/streams/import", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(importedStreams),
-            })
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`)
-            }
-            const updatedStreams = await response.json()
-            setStreams(updatedStreams)
+            // Store parsed data and show confirmation before sending to API
+            setPendingImport(importedStreams)
+            setIsImportConfirmOpen(true)
           }
         } catch (error) {
-          console.error("Error importing streams:", error)
-          // You might want to show this error to the user in the UI
-          alert(`Error importing streams: ${error instanceof Error ? error.message : String(error)}`)
+          console.error("Error reading import file:", error)
+          toast({
+            title: "Invalid file",
+            description: error instanceof Error ? error.message : "The selected file is not valid JSON.",
+            variant: "destructive",
+          })
         }
       }
-      reader.onerror = (error) => {
-        console.error("FileReader error:", error)
-        alert("Error reading file. Please try again.")
+      reader.onerror = () => {
+        toast({
+          title: "File read error",
+          description: "Could not read the file. Please try again.",
+          variant: "destructive",
+        })
       }
       reader.readAsText(file)
+    }
+  }
+
+  // Step 2: user confirmed — send to API and replace streams
+  const handleImportConfirm = async () => {
+    if (!pendingImport) return
+    try {
+      const response = await fetch("/api/streams/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pendingImport),
+      })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const updatedStreams = await response.json()
+      setStreams(updatedStreams)
+      toast({
+        title: "Streams imported",
+        description: `${updatedStreams.length} stream${updatedStreams.length !== 1 ? "s" : ""} loaded successfully.`,
+      })
+    } catch (error) {
+      console.error("Error importing streams:", error)
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Something went wrong.",
+        variant: "destructive",
+      })
+    } finally {
+      setPendingImport(null)
+      setIsImportConfirmOpen(false)
     }
   }
 
@@ -235,10 +320,66 @@ export default function MultiViewer() {
     })
   }
 
+  // State to track if a specific stream is soloed (maximized)
+  const [soloStreamId, setSoloStreamId] = useState<string | null>(null)
+
+  const toggleSoloStream = (id: string) => {
+    setSoloStreamId((prevId) => (prevId === id ? null : id))
+  }
+
+  // Handle fatal error prop from individual VideoPlayers.
+  // Both "token_expired" (403, CDN blip) and "stream_down" (persistent network failure)
+  // trigger the same soft reload — incrementing softReloadKey fully remounts all VideoPlayer
+  // components, resetting isPermanentlyStoppedRef and all other stuck state.
+  const handleFatalError = (reason: "token_expired" | "stream_down") => {
+    console.log(`Fatal error signal received: ${reason}. Queuing soft reload.`)
+    setFatalErrorCount((prev) => prev + 1)
+  }
+
+  // Cross-stream error correlation handler (Tier 1.5)
+  const handleStreamStatus = useCallback((status: { type: string; title: string }) => {
+    streamErrorsRef.current.set(status.title, { type: status.type, time: Date.now() })
+  }, [])
+
+  // Periodic check for cross-stream error patterns
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now()
+      const errors = streamErrorsRef.current
+      const activeStreams = streams.length
+      if (activeStreams === 0) {
+        setStreamCorrelationBanner(null)
+        return
+      }
+
+      const typeCounts: Record<string, number> = {}
+      for (const [, entry] of errors) {
+        if (now - entry.time < 30000) {
+          typeCounts[entry.type] = (typeCounts[entry.type] || 0) + 1
+        }
+      }
+
+      for (const [type, count] of Object.entries(typeCounts)) {
+        if (count > activeStreams * 0.5) {
+          const label =
+            type === "http_502" ? "Proxy unreachable (502)" :
+            type === "http_403" ? "CDN tokens expiring (403)" :
+            `${type} on ${count}/${activeStreams} streams`
+          setStreamCorrelationBanner(label)
+          streamLog("correlation", "stalled", "correlation_banner", "warn", label, { activeStreams, affectedStreams: count, errorType: type })
+          return
+        }
+      }
+      setStreamCorrelationBanner(null)
+    }, 10000)
+
+    return () => clearInterval(interval)
+  }, [streams.length])
+
   return (
-    <div className={`min-h-screen bg-[#1a1b26] ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
+    <div className={`h-screen bg-[#1a1b26] flex flex-col ${isFullscreen ? "p-0" : "p-4"}`} ref={multiviewerRef}>
       {/* Header with logo and title */}
-      <div className={`flex items-center mb-6 ${isFullscreen ? "hidden" : ""}`}>
+      <div className={`flex items-center shrink-0 mb-4 ${isFullscreen || soloStreamId ? "hidden" : ""}`}>
         <div className="flex items-center">
           <Image
             src="https://i.ibb.co.com/tT7cmrcv/Logo-Vidio-Apps.png"
@@ -285,36 +426,85 @@ export default function MultiViewer() {
           <Button variant="ghost" size="icon" onClick={toggleGlobalMute} className="bg-gray-800 hover:bg-gray-700">
             {globalMute ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsLogsOpen(true)}
+            className="bg-gray-800 hover:bg-gray-700 text-white"
+            title="System Activity Logs"
+          >
+            <FileText className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={handleFullscreen} className="bg-gray-800 hover:bg-gray-700">
             <Maximize className="h-5 w-5" />
           </Button>
         </div>
       </div>
 
+      {/* Cross-stream error correlation banner (Tier 1.5) */}
+      {streamCorrelationBanner && !soloStreamId && (
+        <div className="bg-yellow-600/80 text-white text-sm px-4 py-2 rounded-t-lg flex items-center justify-between shrink-0 mb-2">
+          <span>⚠ {streamCorrelationBanner}</span>
+          <Button variant="ghost" size="sm" className="h-6 text-white hover:bg-yellow-700 ml-4" onClick={() => setStreamCorrelationBanner(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Grid of video players */}
       <div
-        className={`grid gap-2 w-full ${isFullscreen ? "h-screen auto-rows-fr overflow-auto p-2" : "gap-4"}`}
-        style={{
-          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
-        }}
+        className={
+          soloStreamId
+            ? "flex-grow min-h-0 w-full h-full relative" // min-h-0 critical for flex
+            : `grid w-full flex-grow min-h-0 gap-2 overflow-hidden ${isFullscreen ? "h-screen p-2" : ""}`
+        }
+        style={
+          soloStreamId
+            ? undefined
+            : {
+                gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
+              }
+        }
       >
         {Array.from({ length: gridRows * gridColumns }).map((_, index) => {
           const stream = streams[index]
+
+          if (soloStreamId && stream?.id !== soloStreamId) {
+            // Unmount hidden streams to save bandwidth and CPU when soloing another stream
+            return null
+          }
+
           return (
-            <div key={index} className={`${isFullscreen ? "w-full h-full min-h-0" : "aspect-video"}`}>
-              {stream ? (
+            <div
+              key={`${stream ? stream.id : index}-${softReloadKey}`}
+              className={
+                soloStreamId
+                  ? "w-full h-full absolute inset-0" // Solo mode container overrides
+                  : "w-full h-full min-h-0" // Removing aspect-video to fit perfectly into any screen
+              }
+            >
+              {stream ? (() => {
+                const baseUrl = stream.url
+                const finalUrl = softReloadKey > 0 ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}softReload=${softReloadKey}` : baseUrl
+
+                return (
                 <VideoPlayer
                   title={stream.title}
-                  url={stream.url}
+                  url={finalUrl}
                   onEdit={() => handleEditStream(stream.id)}
                   onDelete={() => handleDeleteStream(stream.id)}
+                  onSolo={() => toggleSoloStream(stream.id)}
                   isMuted={globalMute}
-                  isFullscreen={isFullscreen}
+                  isFullscreen={isFullscreen || !!soloStreamId}
+                  isSoloed={soloStreamId === stream.id}
                   playbackCommand={playbackCommand}
                   startDelayMs={staggerSeed + index * 300}
+                  onFatalError={handleFatalError}
+                  onStreamStatus={handleStreamStatus}
                 />
-              ) : (
+                )
+              })() : (
                 <div className="w-full h-full rounded-lg bg-[#1f2937] flex items-center justify-center">
                   <p className="text-gray-400">No Stream</p>
                 </div>
@@ -325,7 +515,7 @@ export default function MultiViewer() {
       </div>
 
       {/* Fullscreen controls */}
-      {isFullscreen && (
+      {isFullscreen && !soloStreamId && (
         <div className="fixed bottom-4 right-4 z-50 flex gap-2">
           <Button
             variant="ghost"
@@ -349,6 +539,9 @@ export default function MultiViewer() {
       {/* Add stream dialog */}
       <AddStreamDialog isOpen={isAddStreamOpen} onAdd={handleAddStream} onClose={() => setIsAddStreamOpen(false)} />
 
+      {/* System logs dialog */}
+      <LogViewerDialog isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
+
       {/* Edit stream dialog */}
       {editingStream && (
         <AddStreamDialog
@@ -368,6 +561,31 @@ export default function MultiViewer() {
         initialRows={gridRows}
         initialColumns={gridColumns}
       />
+
+      {/* Import confirmation dialog */}
+      <AlertDialog open={isImportConfirmOpen} onOpenChange={setIsImportConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace current streams?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will replace all {streams.length} current stream{streams.length !== 1 ? "s" : ""} with{" "}
+              <strong>{pendingImport?.length ?? 0} stream{(pendingImport?.length ?? 0) !== 1 ? "s" : ""}</strong> from the imported file.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setPendingImport(null); setIsImportConfirmOpen(false) }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleImportConfirm}>
+              Replace
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Toast notifications */}
+      <Toaster />
     </div>
   )
 }
