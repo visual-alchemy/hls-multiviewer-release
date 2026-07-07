@@ -111,7 +111,7 @@ export function LogViewerDialog({ isOpen, onClose }: LogViewerDialogProps) {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-violet-500"></span>
               </span>
-              <span>Loading today's system logs...</span>
+              <span>Loading today&apos;s system logs...</span>
             </div>
           ) : (
             <div className="space-y-0.5">{renderLogLines()}</div>
